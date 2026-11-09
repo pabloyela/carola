@@ -105,11 +105,24 @@ object AudioFiles {
     fun isBrowsableDir(f: File): Boolean =
         !f.name.startsWith(".") && f.name.lowercase() !in skipDirs && f.isDirectory
 
-    fun list(dir: File): Listing {
+    fun list(dir: File, markMusic: Boolean = false): Listing {
         val all = dir.listFiles() ?: emptyArray()
         val dirs = all.filter(::isBrowsableDir).sortedWith(compareBy(NaturalOrder) { it.name })
         val files = all.filter(::isAudio).sortedWith(compareBy(NaturalOrder) { it.name })
-        return Listing(dir, dirs, files)
+        val musicDirs = if (markMusic) {
+            dirs.filter { hasMusic(it, depth = 2) }.map { it.absolutePath }.toSet()
+        } else {
+            emptySet()
+        }
+        return Listing(dir, dirs, files, musicDirs)
+    }
+
+    /** ¿La carpeta tiene canciones, directamente o en sus subcarpetas (hasta [depth] niveles)? */
+    fun hasMusic(dir: File, depth: Int): Boolean {
+        val children = dir.listFiles() ?: return false
+        if (children.any(::isAudio)) return true
+        if (depth <= 0) return false
+        return children.any { isBrowsableDir(it) && hasMusic(it, depth - 1) }
     }
 
     /** Recorre la carpeta: primero sus canciones, luego subcarpetas en orden. */

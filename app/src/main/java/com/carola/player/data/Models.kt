@@ -61,7 +61,13 @@ data class CoverRequest(
     val title: String?,
 )
 
-data class Listing(val dir: File?, val dirs: List<File>, val files: List<File>)
+data class Listing(
+    val dir: File?,
+    val dirs: List<File>,
+    val files: List<File>,
+    /** Subcarpetas que tienen música (directa o hasta dos niveles adentro). */
+    val musicDirs: Set<String> = emptySet(),
+)
 
 object Keys {
     private val spaces = Regex("\\s+")

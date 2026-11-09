@@ -14,6 +14,10 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("auto_resume", true)
         set(v) = sp.edit().putBoolean("auto_resume", v).apply()
 
+    var musicFolders: Set<String>
+        get() = sp.getStringSet("music_folders", null)?.toSet() ?: emptySet()
+        set(v) = sp.edit().putStringSet("music_folders", v.toSet()).apply()
+
     var savedQueue: String?
         get() = sp.getString("queue", null)
         set(v) = sp.edit().putString("queue", v).apply()

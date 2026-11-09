@@ -50,7 +50,7 @@ class LibraryRepository(context: Context) {
         }
     }
 
-    suspend fun scan(roots: List<StorageRoot>) {
+    suspend fun scan(roots: List<StorageRoot>, extraFolders: List<File> = emptyList()) {
         if (scanMutex.isLocked) return
         scanMutex.withLock {
             withContext(Dispatchers.IO) {
@@ -64,6 +64,12 @@ class LibraryRepository(context: Context) {
                         AudioFiles.walk(base, list)
                         found += list
                     }
+                }
+                // Carpetas marcadas por el usuario como "de música"
+                extraFolders.filter { it.isDirectory }.forEach { folder ->
+                    val list = mutableListOf<File>()
+                    AudioFiles.walk(folder, list)
+                    found += list
                 }
                 val files = found.toList()
                 _scan.value = ScanState(true, 0, files.size)

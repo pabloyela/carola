@@ -101,6 +101,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val scan: StateFlow<ScanState> = library.scan
 
+    private val _musicFolders = MutableStateFlow(prefs.musicFolders)
+    /** Carpetas que el usuario marcó como "de música". */
+    val musicFolders: StateFlow<Set<String>> = _musicFolders.asStateFlow()
+
     val albums: StateFlow<List<Album>> = library.tracks
         .map { buildAlbums(it) }
         .flowOn(Dispatchers.Default)
@@ -213,8 +217,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val r = withContext(Dispatchers.IO) { StorageRoots.find(getApplication<Application>()) }
             _roots.value = r
-            library.scan(r)
+            library.scan(r, _musicFolders.value.map { File(it) })
         }
+    }
+
+    fun isMusicFolder(dir: File): Boolean = dir.absolutePath in _musicFolders.value
+
+    /** Marca o desmarca una carpeta como "de música" y vuelve a escanear. */
+    fun toggleMusicFolder(dir: File) {
+        val path = dir.absolutePath
+        val updated = _musicFolders.value.toMutableSet()
+        if (!updated.add(path)) updated.remove(path)
+        prefs.musicFolders = updated
+        _musicFolders.value = updated
+        rescan()
     }
 
     fun openFolder(dir: File?) {
@@ -223,7 +239,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _listing.value = if (dir == null) {
                 Listing(null, emptyList(), emptyList())
             } else {
-                withContext(Dispatchers.IO) { AudioFiles.list(dir) }
+                withContext(Dispatchers.IO) { AudioFiles.list(dir, markMusic = true) }
             }
         }
     }

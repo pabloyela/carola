@@ -20,7 +20,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -38,12 +42,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.carola.player.MainViewModel
+import com.carola.player.data.NaturalOrder
 import com.carola.player.data.StorageRoot
 import com.carola.player.data.Track
 import com.carola.player.data.formatTime
@@ -53,6 +59,7 @@ import java.io.File
 fun FolderScreen(vm: MainViewModel, onPlayed: () -> Unit) {
     val folder by vm.folder.collectAsStateWithLifecycle()
     val roots by vm.roots.collectAsStateWithLifecycle()
+    val musicFolders by vm.musicFolders.collectAsStateWithLifecycle()
     val pb by vm.playback.collectAsStateWithLifecycle()
     val scrollStates = remember { mutableMapOf<String, LazyListState>() }
 
@@ -61,13 +68,19 @@ fun FolderScreen(vm: MainViewModel, onPlayed: () -> Unit) {
     val dir = folder
     Column(Modifier.fillMaxSize()) {
         if (dir == null) {
-            ScreenHeader("Música", "Memorias conectadas") {
+            ScreenHeader("Música", "Tus carpetas y memorias conectadas") {
                 BigIconButton(Icons.Rounded.Refresh, { vm.refreshRoots() }, size = 56.dp)
             }
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-            RootsList(roots, onOpen = { vm.openFolder(File(it.path)) }, onRefresh = { vm.refreshRoots() })
+            RootsList(
+                roots = roots,
+                musicFolders = musicFolders.sortedWith(compareBy(NaturalOrder) { File(it).name }),
+                onOpenRoot = { vm.openFolder(File(it.path)) },
+                onOpenFolder = { vm.openFolder(File(it)) },
+                onRefresh = { vm.refreshRoots() },
+            )
         } else {
-            FolderContent(vm, dir, scrollStates, pb.path, onPlayed)
+            FolderContent(vm, dir, musicFolders, scrollStates, pb.path, onPlayed)
         }
     }
 }
@@ -76,6 +89,7 @@ fun FolderScreen(vm: MainViewModel, onPlayed: () -> Unit) {
 private fun FolderContent(
     vm: MainViewModel,
     dir: File,
+    musicFolders: Set<String>,
     scrollStates: MutableMap<String, LazyListState>,
     playingPath: String?,
     onPlayed: () -> Unit,
@@ -85,9 +99,21 @@ private fun FolderContent(
     val rel = root?.let { dir.absolutePath.removePrefix(it.path).trim('/') }.orEmpty()
     val crumb = listOfNotNull(root?.name, rel.ifEmpty { null }).joinToString(" / ").replace("/", " › ")
     val ready = listing.dir == dir
+    val marked = dir.absolutePath in musicFolders
+    val accent = MaterialTheme.colorScheme.primary
 
     ScreenHeader(if (rel.isEmpty()) (root?.name ?: dir.name) else dir.name, crumb, onBack = { vm.folderUp() }) {
-        if (ready && (listing.files.isNotEmpty() || listing.dirs.isNotEmpty())) {
+        // Marcar / desmarcar como carpeta de música (no se ofrece en la raíz de una memoria)
+        if (rel.isNotEmpty()) {
+            BigIconButton(
+                if (marked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                { vm.toggleMusicFolder(dir) },
+                size = 56.dp,
+                tint = if (marked) accent else Color.White.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.width(10.dp))
+        }
+        if (ready && (listing.files.isNotEmpty() || listing.musicDirs.isNotEmpty())) {
             FilledTonalButton(
                 onClick = { vm.playFolder(dir, shuffle = false, recursive = listing.files.isEmpty()); onPlayed() },
                 modifier = Modifier.height(54.dp),
@@ -117,7 +143,11 @@ private fun FolderContent(
             val state = scrollStates.getOrPut(dir.absolutePath) { LazyListState() }
             LazyColumn(state = state, contentPadding = PaddingValues(vertical = 6.dp)) {
                 items(listing.dirs, key = { "d" + it.absolutePath }) { d ->
-                    FolderRow(d) { vm.openFolder(d) }
+                    FolderRow(
+                        dir = d,
+                        hasMusic = d.absolutePath in listing.musicDirs,
+                        marked = d.absolutePath in musicFolders,
+                    ) { vm.openFolder(d) }
                 }
                 itemsIndexed(listing.files, key = { _, f -> "f" + f.absolutePath }) { i, f ->
                     FileRow(
@@ -136,49 +166,121 @@ private fun FolderContent(
 }
 
 @Composable
-private fun RootsList(roots: List<StorageRoot>, onOpen: (StorageRoot) -> Unit, onRefresh: () -> Unit) {
-    if (roots.isEmpty()) {
+private fun RootsList(
+    roots: List<StorageRoot>,
+    musicFolders: List<String>,
+    onOpenRoot: (StorageRoot) -> Unit,
+    onOpenFolder: (String) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    if (roots.isEmpty() && musicFolders.isEmpty()) {
         EmptyState(Icons.Rounded.Usb, "No se detectó ninguna USB", "Conéctala y toca Actualizar.") {
             Button(onClick = onRefresh, modifier = Modifier.height(56.dp)) { Text("Actualizar", fontSize = 18.sp) }
         }
         return
     }
+    val accent = MaterialTheme.colorScheme.primary
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-        items(roots, key = { it.path }) { r ->
-            Row(
-                Modifier.fillMaxWidth().height(92.dp).clickable { onOpen(r) }.padding(horizontal = 24.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    if (r.isInternal) Icons.Rounded.PhoneAndroid else Icons.Rounded.Usb, null,
-                    tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(42.dp),
-                )
-                Spacer(Modifier.width(20.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(r.name, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                    Text(r.path, fontSize = 14.sp, color = Color.White.copy(alpha = 0.5f))
-                }
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Color.White.copy(alpha = 0.4f))
+        if (musicFolders.isNotEmpty()) {
+            item(key = "h-music") { SectionTitle("Mis carpetas de música") }
+            items(musicFolders, key = { "m$it" }) { path ->
+                val f = File(path)
+                val available = f.isDirectory
+                BigRow(
+                    icon = Icons.Rounded.LibraryMusic,
+                    iconTint = if (available) accent else Color.White.copy(alpha = 0.3f),
+                    title = f.name,
+                    subtitle = if (available) path else "No disponible (¿USB desconectada?)",
+                    enabled = available,
+                ) { onOpenFolder(path) }
             }
+            item(key = "h-storage") { SectionTitle("Almacenamiento") }
+        }
+        items(roots, key = { it.path }) { r ->
+            BigRow(
+                icon = if (r.isInternal) Icons.Rounded.PhoneAndroid else Icons.Rounded.Usb,
+                iconTint = accent,
+                title = r.name,
+                subtitle = r.path,
+            ) { onOpenRoot(r) }
         }
     }
 }
 
 @Composable
-private fun FolderRow(dir: File, onClick: () -> Unit) {
+private fun SectionTitle(text: String) {
+    Text(
+        text.uppercase(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp,
+        color = Color.White.copy(alpha = 0.5f),
+        modifier = Modifier.padding(start = 24.dp, top = 14.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun BigRow(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().height(88.dp).clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = iconTint, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.width(20.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
+                color = if (enabled) Color.White else Color.White.copy(alpha = 0.4f),
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                subtitle, fontSize = 14.sp, color = Color.White.copy(alpha = 0.5f),
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (enabled) {
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Color.White.copy(alpha = 0.4f))
+        }
+    }
+}
+
+@Composable
+private fun FolderRow(dir: File, hasMusic: Boolean, marked: Boolean, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     Row(
         Modifier.fillMaxWidth().height(70.dp).clickable(onClick = onClick).padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.Rounded.Folder, null,
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f), modifier = Modifier.size(34.dp),
+            when {
+                marked -> Icons.Rounded.LibraryMusic
+                hasMusic -> Icons.Rounded.Folder
+                else -> Icons.Rounded.FolderOpen
+            },
+            null,
+            tint = if (marked || hasMusic) accent else Color.White.copy(alpha = 0.3f),
+            modifier = Modifier.size(34.dp),
         )
         Spacer(Modifier.width(18.dp))
-        Text(
-            dir.name, fontSize = 20.sp, modifier = Modifier.weight(1f),
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                dir.name, fontSize = 20.sp,
+                color = if (marked || hasMusic) Color.White else Color.White.copy(alpha = 0.55f),
+                fontWeight = if (marked) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            if (marked || hasMusic) {
+                Text(
+                    if (marked) "Carpeta de música" else "Tiene música",
+                    fontSize = 13.sp, color = accent.copy(alpha = 0.85f),
+                )
+            }
+        }
         Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Color.White.copy(alpha = 0.35f))
     }
 }

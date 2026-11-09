@@ -2,11 +2,14 @@ package com.carola.player.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 
@@ -34,5 +37,10 @@ fun CarolaTheme(accent: Color, content: @Composable () -> Unit) {
         onSurfaceVariant = Color(0xFFB8BAC2),
         surfaceContainer = SurfaceDark,
     )
-    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+    MaterialTheme(colorScheme = scheme, typography = Typography()) {
+        // Surface fija el color de texto por defecto en blanco para toda la app
+        Surface(modifier = Modifier.fillMaxSize(), color = Background, contentColor = Color.White) {
+            content()
+        }
+    }
 }
