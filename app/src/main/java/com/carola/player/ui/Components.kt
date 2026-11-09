@@ -22,6 +22,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -73,7 +74,8 @@ fun FileImage(file: File?, modifier: Modifier = Modifier) {
 @Composable
 fun CoverArt(request: CoverRequest, modifier: Modifier = Modifier) {
     val repo = LocalCovers.current
-    val file by produceState(initialValue = repo.peek(request.key), request.key) {
+    val version by repo.version.collectAsState()
+    val file by produceState(initialValue = repo.peek(request.key), request.key, version) {
         if (value == null) value = repo.cover(request)
     }
     FileImage(file, modifier)

@@ -4,12 +4,18 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
@@ -30,6 +36,39 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
     private val resolved = ConcurrentHashMap<String, File>()
     private val inflight = ConcurrentHashMap<String, Deferred<File?>>()
     @Volatile private var offlineUntil = 0L
+    private val cm = context.getSystemService(ConnectivityManager::class.java)
+
+    private val _version = MutableStateFlow(0)
+    /** Cambia cuando conviene volver a intentar portadas (internet volvió, ajuste cambiado...). */
+    val version: StateFlow<Int> = _version.asStateFlow()
+
+    init {
+        // Cuando vuelve el internet, reintentar las portadas que faltan
+        runCatching {
+            cm?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    offlineUntil = 0L
+                    _version.value = _version.value + 1
+                }
+            })
+        }
+    }
+
+    fun refresh() {
+        offlineUntil = 0L
+        _version.value = _version.value + 1
+    }
+
+    private fun hasInternet(): Boolean {
+        val manager = cm ?: return true
+        return try {
+            val n = manager.activeNetwork ?: return false
+            val caps = manager.getNetworkCapabilities(n) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (e: Exception) {
+            true
+        }
+    }
 
     private val imageExt = setOf("jpg", "jpeg", "png")
     private val preferredNames = listOf(
@@ -64,6 +103,7 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
     fun clear() {
         resolved.clear()
         dir.listFiles()?.forEach { it.delete() }
+        refresh()
     }
 
     private suspend fun resolve(req: CoverRequest): File? {
@@ -75,6 +115,7 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
 
         if (!prefs.onlineCovers) return null
         if (System.currentTimeMillis() < offlineUntil) return null
+        if (!hasInternet()) return null // sin internet: no busca ni marca como "no encontrada"
 
         var artist = req.artist?.takeIf { it.isNotBlank() }
         var album = req.album?.takeIf { it.isNotBlank() }

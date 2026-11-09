@@ -22,7 +22,7 @@ data class ScanState(val running: Boolean = false, val done: Int = 0, val total:
  */
 class LibraryRepository(context: Context) {
 
-    private val cacheFile = File(context.filesDir, "library.json")
+    private val cacheFile = File(context.filesDir, "library2.json")
     private val cache = ConcurrentHashMap<String, Track>()
     private val scanMutex = Mutex()
     @Volatile private var cacheLoaded = false
@@ -153,6 +153,7 @@ class LibraryRepository(context: Context) {
 object TagReader {
     private val leadingNumber = Regex("^\\s*(\\d{1,3}\\s*[-._)]|\\d{2}\\s)\\s*")
     private val digits = Regex("^\\s*(\\d{1,3})")
+    private val topicPart = Regex("\\s+-\\s+topic(?=\\s+-\\s+|$)", RegexOption.IGNORE_CASE)
 
     fun read(file: File): Track {
         var title: String? = null
@@ -178,12 +179,20 @@ object TagReader {
             try { r.release() } catch (e: Exception) { }
         }
 
+        artist = artist?.let { NameCleaner.artist(it) }
+        albumArtist = albumArtist?.let { NameCleaner.artist(it) }
+
         val base = file.nameWithoutExtension
         val cleaned = base.replace(leadingNumber, "").ifBlank { base }
-        var finalTitle: String = title ?: cleaned
-        if (title == null && artist == null && cleaned.contains(" - ")) {
-            artist = cleaned.substringBefore(" - ").trim().ifBlank { null }
-            finalTitle = cleaned.substringAfter(" - ").trim().ifBlank { cleaned }
+        val parts = cleaned.replace(topicPart, "").split(" - ").map { it.trim() }.filter { it.isNotEmpty() }
+        var finalTitle: String = NameCleaner.title(title ?: cleaned)
+        if (title == null && artist == null && parts.size >= 2) {
+            // "Artista - Canción" o "Artista - Canción - Álbum"
+            artist = NameCleaner.artist(parts[0])
+            finalTitle = NameCleaner.title(parts[1])
+            if (parts.size >= 3 && album == null) {
+                album = NameCleaner.title(parts.drop(2).joinToString(" - "))
+            }
         }
         if (trackNo == 0) {
             trackNo = digits.find(base)?.groupValues?.get(1)?.toIntOrNull() ?: 0

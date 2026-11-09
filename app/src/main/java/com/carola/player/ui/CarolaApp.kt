@@ -1,6 +1,17 @@
 package com.carola.player.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +58,7 @@ enum class Tab(val label: String, val icon: ImageVector) {
 @Composable
 fun CarolaApp(vm: MainViewModel) {
     val pb by vm.playback.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.FOLDERS) }
     var autoOpened by rememberSaveable { mutableStateOf(false) }
 
@@ -61,12 +73,16 @@ fun CarolaApp(vm: MainViewModel) {
     CompositionLocalProvider(LocalCovers provides vm.covers) {
         Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             NavigationRail(containerColor = RailColor, modifier = Modifier.fillMaxHeight()) {
-                Spacer(Modifier.height(8.dp))
+              Column(
+                  Modifier.fillMaxHeight().verticalScroll(rememberScrollState()),
+                  horizontalAlignment = Alignment.CenterHorizontally,
+              ) {
+                Spacer(Modifier.height(4.dp))
                 Tab.entries.forEach { t ->
                     NavigationRailItem(
                         selected = tab == t,
                         onClick = { tab = t },
-                        icon = { Icon(t.icon, contentDescription = t.label, modifier = Modifier.size(30.dp)) },
+                        icon = { Icon(t.icon, contentDescription = t.label, modifier = Modifier.size(28.dp)) },
                         label = { Text(t.label, fontSize = 13.sp) },
                         colors = NavigationRailItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
@@ -75,8 +91,12 @@ fun CarolaApp(vm: MainViewModel) {
                             unselectedTextColor = Color.White.copy(alpha = 0.55f),
                         ),
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(2.dp))
                 }
+                Spacer(Modifier.height(6.dp))
+                CoverToggle(settings.onlineCovers) { vm.setOnlineCovers(!settings.onlineCovers) }
+                Spacer(Modifier.height(8.dp))
+              }
             }
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 Box(Modifier.weight(1f)) {
@@ -94,5 +114,28 @@ fun CarolaApp(vm: MainViewModel) {
                 }
             }
         }
+    }
+}
+
+/** Botón rápido para activar/desactivar la descarga de portadas por internet. */
+@Composable
+private fun CoverToggle(enabled: Boolean, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    Column(
+        Modifier.width(80.dp).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            if (enabled) Icons.Rounded.CloudDownload else Icons.Rounded.CloudOff,
+            contentDescription = "Portadas por internet",
+            tint = if (enabled) accent else Color.White.copy(alpha = 0.4f),
+            modifier = Modifier.size(28.dp),
+        )
+        Text(
+            if (enabled) "Portadas\nen línea" else "Portadas\napagadas",
+            fontSize = 11.sp, lineHeight = 13.sp, textAlign = TextAlign.Center,
+            color = if (enabled) accent else Color.White.copy(alpha = 0.4f),
+        )
     }
 }

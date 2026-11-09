@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -148,6 +149,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         app.registerReceiver(usbReceiver, filter)
         connect()
+        // Reintentar la portada de lo que suena cuando cambia el ajuste o vuelve el internet
+        viewModelScope.launch {
+            covers.version.drop(1).collect {
+                if (_cover.value == null) {
+                    currentCoverKey = null
+                    update()
+                }
+            }
+        }
         viewModelScope.launch {
             var ticks = 0
             while (isActive) {
@@ -470,10 +480,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setOnlineCovers(v: Boolean) {
         prefs.onlineCovers = v
         _settings.value = _settings.value.copy(onlineCovers = v)
-        if (v) {
-            currentCoverKey = null
-            update()
-        }
+        covers.refresh()
     }
 
     fun setScanWholeUsb(v: Boolean) {
@@ -491,6 +498,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { covers.clear() }
             currentCoverKey = null
+            _cover.value = null
             update()
         }
     }

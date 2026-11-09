@@ -44,7 +44,7 @@ class MusicBrainzClient {
                 val ids = mutableListOf<String>()
 
                 if (album != null) {
-                    val q = "releasegroup:\"${clean(album.replace(discSuffix, ""))}\" AND artist:\"${clean(artist)}\""
+                    val q = "releasegroup:\"${clean(album.replace(discSuffix, ""))}\" AND artist:\"${clean(NameCleaner.artist(artist))}\""
                     val json = getJson("$MB/release-group/?fmt=json&limit=5&query=${enc(q)}")
                     val arr = json.optJSONArray("release-groups")
                     if (arr != null) {
@@ -57,20 +57,11 @@ class MusicBrainzClient {
 
                 // Sin álbum (o sin resultados): buscar por canción
                 if (ids.isEmpty() && !title.isNullOrBlank()) {
-                    val q = "recording:\"${clean(title)}\" AND artist:\"${clean(artist)}\""
-                    val json = getJson("$MB/recording/?fmt=json&limit=5&query=${enc(q)}")
-                    val arr = json.optJSONArray("recordings")
-                    if (arr != null) {
-                        for (i in 0 until arr.length()) {
-                            val o = arr.getJSONObject(i)
-                            if (o.optInt("score") < 85) continue
-                            val releases = o.optJSONArray("releases") ?: continue
-                            for (j in 0 until minOf(releases.length(), 3)) {
-                                ids += "release/" + releases.getJSONObject(j).getString("id")
-                            }
-                            if (ids.size >= 6) break
-                        }
-                    }
+                    ids += recordingReleases(title, artist)
+                }
+                // Por si el nombre era "Artista - Álbum - Canción": probar al revés
+                if (ids.isEmpty() && album != null) {
+                    ids += recordingReleases(album, artist)
                 }
 
                 if (ids.isEmpty()) return@withContext Result.NotFound
@@ -86,6 +77,23 @@ class MusicBrainzClient {
                 Result.Error
             }
         }
+
+    private suspend fun recordingReleases(title: String, artist: String): List<String> {
+        val ids = mutableListOf<String>()
+        val q = "recording:\"${clean(title)}\" AND artist:\"${clean(artist)}\""
+        val json = getJson("$MB/recording/?fmt=json&limit=5&query=${enc(q)}")
+        val arr = json.optJSONArray("recordings") ?: return ids
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            if (o.optInt("score") < 85) continue
+            val releases = o.optJSONArray("releases") ?: continue
+            for (j in 0 until minOf(releases.length(), 3)) {
+                ids += "release/" + releases.getJSONObject(j).getString("id")
+            }
+            if (ids.size >= 6) break
+        }
+        return ids
+    }
 
     private suspend fun throttle() {
         mutex.withLock {
@@ -132,5 +140,5 @@ class MusicBrainzClient {
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    private fun clean(s: String) = s.replace(special, " ").replace(spaces, " ").trim()
+    private fun clean(s: String) = NameCleaner.title(s).replace(special, " ").replace(spaces, " ").trim()
 }
