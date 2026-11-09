@@ -46,6 +46,11 @@ fun SettingsScreen(vm: MainViewModel) {
             settings.onlineCovers, vm::setOnlineCovers,
         )
         SettingSwitch(
+            "Incluir las USB completas en Álbumes",
+            "Encendido: toda la música de las USB aparece en Álbumes y Artistas. Apagado: solo las carpetas que marques con el marcador. De la memoria interna siempre se usan solo las carpetas marcadas.",
+            settings.scanWholeUsb, vm::setScanWholeUsb,
+        )
+        SettingSwitch(
             "Reanudar al encender",
             "Al abrir la app continúa la última canción donde se quedó.",
             settings.autoResume, vm::setAutoResume,

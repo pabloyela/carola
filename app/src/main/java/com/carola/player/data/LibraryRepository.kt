@@ -45,51 +45,70 @@ class LibraryRepository(context: Context) {
                 cache[t.path] = t
             }
         }
-        if (_tracks.value.isEmpty()) {
-            _tracks.value = cache.values.filter { File(it.path).exists() }
+    }
+
+    private data class ScanRequest(
+        val roots: List<StorageRoot>,
+        val extraFolders: List<File>,
+        val includeUsb: Boolean,
+    )
+
+    @Volatile private var pending: ScanRequest? = null
+
+    /**
+     * Qué se escanea para Álbumes/Artistas:
+     *  - Memoria interna: solo las carpetas que marcaste.
+     *  - USB: completas (si [includeUsb] está activo); si no, también solo lo marcado.
+     * Si llega un pedido mientras otro escaneo corre, se repite al terminar con lo más reciente.
+     */
+    suspend fun scan(roots: List<StorageRoot>, extraFolders: List<File>, includeUsb: Boolean) {
+        pending = ScanRequest(roots, extraFolders, includeUsb)
+        if (scanMutex.isLocked) return
+        scanMutex.withLock {
+            while (true) {
+                val req = pending ?: break
+                pending = null
+                runScan(req)
+            }
         }
     }
 
-    suspend fun scan(roots: List<StorageRoot>, extraFolders: List<File> = emptyList()) {
-        if (scanMutex.isLocked) return
-        scanMutex.withLock {
-            withContext(Dispatchers.IO) {
-                loadCache()
-                _scan.value = ScanState(running = true)
-                val found = LinkedHashSet<File>()
-                roots.forEach { root ->
-                    val base = if (root.isInternal) File(root.path, "Music") else File(root.path)
-                    if (base.isDirectory) {
-                        val list = mutableListOf<File>()
-                        AudioFiles.walk(base, list)
-                        found += list
-                    }
-                }
-                // Carpetas marcadas por el usuario como "de música"
-                extraFolders.filter { it.isDirectory }.forEach { folder ->
+    private suspend fun runScan(req: ScanRequest): Unit = withContext(Dispatchers.IO) {
+        loadCache()
+        _scan.value = ScanState(running = true)
+        val found = LinkedHashSet<File>()
+        if (req.includeUsb) {
+            req.roots.filter { !it.isInternal }.forEach { root ->
+                val base = File(root.path)
+                if (base.isDirectory) {
                     val list = mutableListOf<File>()
-                    AudioFiles.walk(folder, list)
+                    AudioFiles.walk(base, list)
                     found += list
                 }
-                val files = found.toList()
-                _scan.value = ScanState(true, 0, files.size)
-                val result = ArrayList<Track>(files.size)
-                files.forEachIndexed { i, f ->
-                    val p = f.absolutePath
-                    val cached = cache[p]
-                    val t = if (cached != null && cached.lastModified == f.lastModified() && cached.size == f.length()) {
-                        cached
-                    } else {
-                        TagReader.read(f).also { cache[p] = it }
-                    }
-                    result += t
-                    if (i % 25 == 0) _scan.value = ScanState(true, i, files.size)
-                }
-                _tracks.value = result
-                save()
-                _scan.value = ScanState(false, files.size, files.size)
             }
         }
+        req.extraFolders.filter { it.isDirectory }.forEach { folder ->
+            val list = mutableListOf<File>()
+            AudioFiles.walk(folder, list)
+            found += list
+        }
+        val files = found.toList()
+        _scan.value = ScanState(true, 0, files.size)
+        val result = ArrayList<Track>(files.size)
+        files.forEachIndexed { i, f ->
+            val p = f.absolutePath
+            val cached = cache[p]
+            val t = if (cached != null && cached.lastModified == f.lastModified() && cached.size == f.length()) {
+                cached
+            } else {
+                TagReader.read(f).also { cache[p] = it }
+            }
+            result += t
+            if (i % 25 == 0) _scan.value = ScanState(true, i, files.size)
+        }
+        _tracks.value = result
+        save()
+        _scan.value = ScanState(false, files.size, files.size)
     }
 
     private fun save() {

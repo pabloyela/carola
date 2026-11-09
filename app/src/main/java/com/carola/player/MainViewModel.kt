@@ -70,7 +70,7 @@ data class PlaybackUi(
     val queueVersion: Int = 0,
 )
 
-data class SettingsUi(val onlineCovers: Boolean, val autoResume: Boolean)
+data class SettingsUi(val onlineCovers: Boolean, val autoResume: Boolean, val scanWholeUsb: Boolean)
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -96,7 +96,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _accent = MutableStateFlow<Int?>(null)
     val accent: StateFlow<Int?> = _accent.asStateFlow()
 
-    private val _settings = MutableStateFlow(SettingsUi(prefs.onlineCovers, prefs.autoResume))
+    private val _settings = MutableStateFlow(SettingsUi(prefs.onlineCovers, prefs.autoResume, prefs.scanWholeUsb))
     val settings: StateFlow<SettingsUi> = _settings.asStateFlow()
 
     val scan: StateFlow<ScanState> = library.scan
@@ -217,7 +217,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val r = withContext(Dispatchers.IO) { StorageRoots.find(getApplication<Application>()) }
             _roots.value = r
-            library.scan(r, _musicFolders.value.map { File(it) })
+            library.scan(r, _musicFolders.value.map { File(it) }, prefs.scanWholeUsb)
         }
     }
 
@@ -474,6 +474,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             currentCoverKey = null
             update()
         }
+    }
+
+    fun setScanWholeUsb(v: Boolean) {
+        prefs.scanWholeUsb = v
+        _settings.value = _settings.value.copy(scanWholeUsb = v)
+        rescan()
     }
 
     fun setAutoResume(v: Boolean) {

@@ -79,7 +79,7 @@ fun AlbumsScreen(vm: MainViewModel, onPlayed: () -> Unit) {
             if (albums.isEmpty() && !scan.running) {
                 EmptyState(
                     Icons.Rounded.Album, "Aún no hay álbumes",
-                    "Conecta tu USB y toca Escanear para leer tu música.",
+                    "Conecta tu USB o marca tus carpetas de música con el marcador 🔖 en Carpetas.",
                 ) {
                     Button(onClick = { vm.rescan() }, modifier = Modifier.height(56.dp)) {
                         Text("Escanear", fontSize = 18.sp)
