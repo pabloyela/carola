@@ -2,10 +2,13 @@ package com.carola.player.player
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -21,6 +24,11 @@ import java.io.File
 class PlaybackService : MediaSessionService() {
 
     private var session: MediaSession? = null
+    private val normalizer = AudioNormalizer()
+    private lateinit var prefs: SharedPreferences
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+        if (key == "normalize") normalizer.setEnabled(sp.getBoolean("normalize", true))
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -33,6 +41,21 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+
+        // Nivelación de volumen
+        prefs = getSharedPreferences("carola", MODE_PRIVATE)
+        normalizer.setEnabled(prefs.getBoolean("normalize", true))
+        prefs.registerOnSharedPreferenceChangeListener(prefListener)
+        normalizer.attach(player.audioSessionId)
+        player.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                normalizer.attach(audioSessionId)
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                normalizer.setTrackGain(ReplayGain.find(tracks))
+            }
+        })
 
         val openApp = PendingIntent.getActivity(
             this, 0,
@@ -62,6 +85,8 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onDestroy() {
+        runCatching { prefs.unregisterOnSharedPreferenceChangeListener(prefListener) }
+        normalizer.release()
         session?.run {
             player.release()
             release()

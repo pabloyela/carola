@@ -41,6 +41,11 @@ fun SettingsScreen(vm: MainViewModel) {
         Spacer(Modifier.height(16.dp))
 
         SettingSwitch(
+            "Nivelar volumen",
+            "Evita que unas canciones suenen mucho más fuerte que otras. Si la canción trae ReplayGain se usa ese valor; si no, un nivelador automático.",
+            settings.normalize, vm::setNormalize,
+        )
+        SettingSwitch(
             "Descargar portadas de internet",
             "Si la canción no trae portada ni hay un cover.jpg en la carpeta, se busca en MusicBrainz. Necesita internet (por ejemplo, el hotspot del teléfono).",
             settings.onlineCovers, vm::setOnlineCovers,
@@ -79,7 +84,7 @@ fun SettingsScreen(vm: MainViewModel) {
 
         Spacer(Modifier.height(28.dp))
         Text(
-            "Carola 1.0 · Portadas: MusicBrainz y Cover Art Archive",
+            "Carola 2.0 · Portadas: MusicBrainz y Cover Art Archive",
             fontSize = 14.sp, color = Color.White.copy(alpha = 0.4f),
         )
     }

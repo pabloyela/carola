@@ -14,6 +14,10 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("auto_resume", true)
         set(v) = sp.edit().putBoolean("auto_resume", v).apply()
 
+    var normalize: Boolean
+        get() = sp.getBoolean("normalize", true)
+        set(v) = sp.edit().putBoolean("normalize", v).apply()
+
     var scanWholeUsb: Boolean
         get() = sp.getBoolean("scan_whole_usb", true)
         set(v) = sp.edit().putBoolean("scan_whole_usb", v).apply()

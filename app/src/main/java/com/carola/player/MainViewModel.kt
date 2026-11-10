@@ -29,6 +29,8 @@ import com.carola.player.data.Listing
 import com.carola.player.data.Palettes
 import com.carola.player.data.Prefs
 import com.carola.player.data.ScanState
+import com.carola.player.data.SearchIndex
+import com.carola.player.data.SearchResults
 import com.carola.player.data.StorageRoot
 import com.carola.player.data.StorageRoots
 import com.carola.player.data.Track
@@ -37,12 +39,15 @@ import com.carola.player.data.buildArtists
 import com.carola.player.player.PlaybackService
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -71,8 +76,14 @@ data class PlaybackUi(
     val queueVersion: Int = 0,
 )
 
-data class SettingsUi(val onlineCovers: Boolean, val autoResume: Boolean, val scanWholeUsb: Boolean)
+data class SettingsUi(
+    val onlineCovers: Boolean,
+    val autoResume: Boolean,
+    val scanWholeUsb: Boolean,
+    val normalize: Boolean,
+)
 
+@OptIn(FlowPreview::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = Prefs(app)
@@ -97,7 +108,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _accent = MutableStateFlow<Int?>(null)
     val accent: StateFlow<Int?> = _accent.asStateFlow()
 
-    private val _settings = MutableStateFlow(SettingsUi(prefs.onlineCovers, prefs.autoResume, prefs.scanWholeUsb))
+    private val _settings = MutableStateFlow(SettingsUi(prefs.onlineCovers, prefs.autoResume, prefs.scanWholeUsb, prefs.normalize))
     val settings: StateFlow<SettingsUi> = _settings.asStateFlow()
 
     val scan: StateFlow<ScanState> = library.scan
@@ -115,6 +126,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         .map { buildArtists(it) }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ---------- Búsqueda ----------
+
+    private val _query = MutableStateFlow("")
+    val query: StateFlow<String> = _query.asStateFlow()
+
+    private val searchIndex: StateFlow<SearchIndex> = combine(albums, artists) { al, ar -> SearchIndex(al, ar) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SearchIndex.EMPTY)
+
+    val searchResults: StateFlow<SearchResults> = combine(_query.debounce(200), searchIndex) { q, idx -> idx.search(q) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, SearchResults())
+
+    fun setQuery(q: String) {
+        _query.value = q
+    }
 
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -487,6 +515,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prefs.scanWholeUsb = v
         _settings.value = _settings.value.copy(scanWholeUsb = v)
         rescan()
+    }
+
+    fun setNormalize(v: Boolean) {
+        prefs.normalize = v // el servicio de reproducción escucha este cambio
+        _settings.value = _settings.value.copy(normalize = v)
     }
 
     fun setAutoResume(v: Boolean) {

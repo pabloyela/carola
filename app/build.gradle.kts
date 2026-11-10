@@ -14,8 +14,8 @@ android {
         minSdk = 26
         // targetSdk 28 = Android 9: acceso clásico a las USB por ruta de archivo
         targetSdk = 28
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
     }
 
     buildTypes {
