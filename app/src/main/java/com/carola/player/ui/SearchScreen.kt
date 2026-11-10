@@ -207,7 +207,7 @@ private fun Results(
                 Row(
                     Modifier.fillMaxWidth().height(70.dp).clickable {
                         // Reproduce el álbum completo empezando por esta canción
-                        vm.playTracks(a.tracks, a.tracks.indexOfFirst { it.path == t.path }.coerceAtLeast(0))
+                        vm.playAlbum(a, a.tracks.indexOfFirst { it.path == t.path }.coerceAtLeast(0))
                         onPlayed()
                     }.padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,

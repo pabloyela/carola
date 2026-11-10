@@ -1,7 +1,12 @@
 package com.carola.player.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +32,7 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Usb
@@ -95,6 +101,7 @@ private fun FolderContent(
     onPlayed: () -> Unit,
 ) {
     val listing by vm.listing.collectAsStateWithLifecycle()
+    val lists by vm.listsState.collectAsStateWithLifecycle()
     val root = vm.rootFor(dir)
     val rel = root?.let { dir.absolutePath.removePrefix(it.path).trim('/') }.orEmpty()
     val crumb = listOfNotNull(root?.name, rel.ifEmpty { null }).joinToString(" / ").replace("/", " › ")
@@ -141,7 +148,15 @@ private fun FolderContent(
             EmptyState(Icons.Rounded.Folder, "Carpeta vacía", "Aquí no hay música ni subcarpetas.")
         else -> {
             val state = scrollStates.getOrPut(dir.absolutePath) { LazyListState() }
+            val resume = lists.resume[vm.folderKey(dir)]
+                ?.takeIf { it.path.startsWith(dir.absolutePath + "/") && playingPath != it.path }
             LazyColumn(state = state, contentPadding = PaddingValues(vertical = 6.dp)) {
+                if (resume != null) {
+                    item(key = "resume") {
+                        val name = vm.library.find(resume.path)?.title ?: File(resume.path).nameWithoutExtension
+                        ResumeBanner(name, resume.positionMs) { vm.resumeFolder(dir); onPlayed() }
+                    }
+                }
                 items(listing.dirs, key = { "d" + it.absolutePath }) { d ->
                     FolderRow(
                         dir = d,
@@ -155,8 +170,9 @@ private fun FolderContent(
                         number = i + 1,
                         track = vm.library.find(f.absolutePath),
                         playing = playingPath == f.absolutePath,
+                        onLongClick = { vm.requestAddToList(listOf(f.absolutePath)) },
                     ) {
-                        vm.playFiles(listing.files, i)
+                        vm.playFiles(listing.files, i, context = vm.folderKey(dir))
                         onPlayed()
                     }
                 }
@@ -286,17 +302,26 @@ private fun FolderRow(dir: File, hasMusic: Boolean, marked: Boolean, onClick: ()
 }
 
 @Composable
-fun FileRow(file: File, number: Int, track: Track?, playing: Boolean, onClick: () -> Unit) {
+fun FileRow(
+    file: File,
+    number: Int,
+    track: Track?,
+    playing: Boolean,
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     TrackRowContent(
         number = number,
         title = track?.title ?: file.nameWithoutExtension,
         subtitle = track?.artist,
         durationMs = track?.durationMs ?: 0,
         playing = playing,
+        onLongClick = onLongClick,
         onClick = onClick,
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TrackRowContent(
     number: Int,
@@ -304,11 +329,17 @@ fun TrackRowContent(
     subtitle: String?,
     durationMs: Long,
     playing: Boolean,
+    enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val accent = MaterialTheme.colorScheme.primary
+    val main = if (enabled) Color.White else Color.White.copy(alpha = 0.35f)
     Row(
-        Modifier.fillMaxWidth().height(70.dp).clickable(onClick = onClick).padding(horizontal = 24.dp),
+        Modifier.fillMaxWidth().height(70.dp)
+            .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(48.dp), contentAlignment = Alignment.CenterStart) {
@@ -321,19 +352,44 @@ fun TrackRowContent(
         Column(Modifier.weight(1f)) {
             Text(
                 title, fontSize = 19.sp,
-                color = if (playing) accent else Color.White,
+                color = if (playing) accent else main,
                 fontWeight = if (playing) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (!subtitle.isNullOrEmpty()) {
                 Text(
-                    subtitle, fontSize = 14.sp, color = Color.White.copy(alpha = 0.55f),
+                    subtitle, fontSize = 14.sp, color = main.copy(alpha = main.alpha * 0.55f),
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
         }
         if (durationMs > 0) {
             Text(formatTime(durationMs), fontSize = 15.sp, color = Color.White.copy(alpha = 0.5f))
+        }
+        trailing?.invoke()
+    }
+}
+
+/** Tarjeta "Continuar donde te quedaste". */
+@Composable
+fun ResumeBanner(title: String, positionMs: Long, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(accent.copy(alpha = 0.16f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.PlayCircle, null, tint = accent, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Continuar donde te quedaste", fontSize = 14.sp, color = accent, fontWeight = FontWeight.SemiBold)
+            Text(
+                "$title · ${formatTime(positionMs)}", fontSize = 18.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

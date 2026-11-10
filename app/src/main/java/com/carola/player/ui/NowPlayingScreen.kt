@@ -21,7 +21,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -37,6 +40,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +72,7 @@ import java.io.File
 fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
     val pb by vm.playback.collectAsStateWithLifecycle()
     val cover by vm.cover.collectAsStateWithLifecycle()
+    val favorite by vm.isFavorite.collectAsStateWithLifecycle()
     var showQueue by remember { mutableStateOf(false) }
 
     if (!pb.hasMedia) {
@@ -175,6 +180,17 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                         modifier = Modifier.weight(1f),
                     )
                     BigIconButton(
+                        if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        vm::toggleFavoriteCurrent, size = 52.dp,
+                        tint = if (favorite) accent else Color.White.copy(alpha = 0.6f),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    BigIconButton(
+                        Icons.AutoMirrored.Rounded.PlaylistAdd, vm::requestAddCurrentToList, size = 52.dp,
+                        tint = Color.White.copy(alpha = 0.6f),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    BigIconButton(
                         Icons.AutoMirrored.Rounded.QueueMusic, { showQueue = !showQueue }, size = 52.dp,
                         tint = if (showQueue) accent else Color.White.copy(alpha = 0.6f),
                     )
@@ -220,10 +236,20 @@ private fun QueuePanel(vm: MainViewModel, pb: PlaybackUi, modifier: Modifier) {
     Column(
         modifier.clip(RoundedCornerShape(22.dp)).background(Color.Black.copy(alpha = 0.55f))
     ) {
-        Text(
-            "Cola de reproducción", fontSize = 20.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp),
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Cola de reproducción", fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = vm::requestSaveQueue) {
+                Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, null, Modifier.size(22.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Guardar como lista", fontSize = 15.sp)
+            }
+        }
         LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
             items(count = pb.count, key = { it }) { i ->
                 val item = remember(pb.queueVersion, i) { vm.queueItem(i) }

@@ -126,10 +126,15 @@ object AudioFiles {
     }
 
     /** Recorre la carpeta: primero sus canciones, luego subcarpetas en orden. */
-    fun walk(dir: File, out: MutableList<File>, depth: Int = 0) {
+    fun walk(dir: File, out: MutableList<File>, depth: Int = 0, playlists: MutableList<File>? = null) {
         if (depth > 12) return
         val l = list(dir)
         out += l.files
-        l.dirs.forEach { walk(it, out, depth + 1) }
+        if (playlists != null) {
+            dir.listFiles { f -> f.isFile && f.extension.lowercase() in PLAYLIST_EXT }?.let { playlists += it }
+        }
+        l.dirs.forEach { walk(it, out, depth + 1, playlists) }
     }
+
+    val PLAYLIST_EXT = setOf("m3u", "m3u8")
 }

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +52,7 @@ import com.carola.player.MainViewModel
 enum class Tab(val label: String, val icon: ImageVector) {
     NOW("Sonando", Icons.Rounded.GraphicEq),
     SEARCH("Buscar", Icons.Rounded.Search),
+    LISTS("Listas", Icons.AutoMirrored.Rounded.PlaylistPlay),
     FOLDERS("Carpetas", Icons.Rounded.Folder),
     ALBUMS("Álbumes", Icons.Rounded.Album),
     ARTISTS("Artistas", Icons.Rounded.Person),
@@ -109,6 +111,7 @@ fun CarolaApp(vm: MainViewModel) {
                             vm, onPlayed = goNow,
                             onOpenFolder = { f -> vm.openFolder(f); tab = Tab.FOLDERS },
                         )
+                        Tab.LISTS -> ListsScreen(vm, onPlayed = goNow)
                         Tab.FOLDERS -> FolderScreen(vm, onPlayed = goNow)
                         Tab.ALBUMS -> AlbumsScreen(vm, onPlayed = goNow)
                         Tab.ARTISTS -> ArtistsScreen(vm, onPlayed = goNow)
@@ -120,6 +123,7 @@ fun CarolaApp(vm: MainViewModel) {
                 }
             }
         }
+        AddToListDialog(vm)
     }
 }
 

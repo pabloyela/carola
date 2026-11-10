@@ -26,6 +26,11 @@ class Prefs(context: Context) {
         get() = sp.getStringSet("music_folders", null)?.toSet() ?: emptySet()
         set(v) = sp.edit().putStringSet("music_folders", v.toSet()).apply()
 
+    /** Carpeta o álbum desde donde se lanzó la cola actual (para "Continuar"). */
+    var savedContext: String?
+        get() = sp.getString("context", null)
+        set(v) = sp.edit().putString("context", v).apply()
+
     var savedQueue: String?
         get() = sp.getString("queue", null)
         set(v) = sp.edit().putString("queue", v).apply()

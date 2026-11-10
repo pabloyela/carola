@@ -30,6 +30,10 @@ class LibraryRepository(context: Context) {
     private val _tracks = MutableStateFlow<List<Track>>(emptyList())
     val tracks: StateFlow<List<Track>> = _tracks.asStateFlow()
 
+    private val _playlistFiles = MutableStateFlow<List<File>>(emptyList())
+    /** Archivos .m3u encontrados en el último escaneo. */
+    val playlistFiles: StateFlow<List<File>> = _playlistFiles.asStateFlow()
+
     private val _scan = MutableStateFlow(ScanState())
     val scan: StateFlow<ScanState> = _scan.asStateFlow()
 
@@ -77,21 +81,27 @@ class LibraryRepository(context: Context) {
         loadCache()
         _scan.value = ScanState(running = true)
         val found = LinkedHashSet<File>()
+        val m3u = LinkedHashSet<File>()
         if (req.includeUsb) {
             req.roots.filter { !it.isInternal }.forEach { root ->
                 val base = File(root.path)
                 if (base.isDirectory) {
                     val list = mutableListOf<File>()
-                    AudioFiles.walk(base, list)
+                    val pl = mutableListOf<File>()
+                    AudioFiles.walk(base, list, playlists = pl)
                     found += list
+                    m3u += pl
                 }
             }
         }
         req.extraFolders.filter { it.isDirectory }.forEach { folder ->
             val list = mutableListOf<File>()
-            AudioFiles.walk(folder, list)
+            val pl = mutableListOf<File>()
+            AudioFiles.walk(folder, list, playlists = pl)
             found += list
+            m3u += pl
         }
+        _playlistFiles.value = m3u.toList()
         val files = found.toList()
         _scan.value = ScanState(true, 0, files.size)
         val result = ArrayList<Track>(files.size)

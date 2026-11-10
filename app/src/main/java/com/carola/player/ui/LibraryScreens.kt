@@ -226,7 +226,7 @@ fun AlbumDetail(vm: MainViewModel, album: Album, onBack: () -> Unit, onPlayed: (
             Spacer(Modifier.height(16.dp))
             Row {
                 Button(
-                    onClick = { vm.playTracks(album.tracks); onPlayed() },
+                    onClick = { vm.playAlbum(album); onPlayed() },
                     modifier = Modifier.height(54.dp),
                 ) {
                     Icon(Icons.Rounded.PlayArrow, null, Modifier.size(26.dp))
@@ -235,7 +235,7 @@ fun AlbumDetail(vm: MainViewModel, album: Album, onBack: () -> Unit, onPlayed: (
                 }
                 Spacer(Modifier.width(8.dp))
                 FilledTonalButton(
-                    onClick = { vm.playTracks(album.tracks, shuffle = true); onPlayed() },
+                    onClick = { vm.playAlbum(album, shuffle = true); onPlayed() },
                     modifier = Modifier.height(54.dp),
                 ) {
                     Icon(Icons.Rounded.Shuffle, null, Modifier.size(24.dp))
@@ -243,7 +243,16 @@ fun AlbumDetail(vm: MainViewModel, album: Album, onBack: () -> Unit, onPlayed: (
             }
         }
         Spacer(Modifier.width(24.dp))
+        val lists by vm.listsState.collectAsStateWithLifecycle()
+        val resume = lists.resume[vm.albumKey(album)]
+            ?.takeIf { r -> pb.path != r.path && album.tracks.any { it.path == r.path } }
         LazyColumn(Modifier.weight(1f)) {
+            if (resume != null) {
+                item(key = "resume") {
+                    val name = album.tracks.first { it.path == resume.path }.title
+                    ResumeBanner(name, resume.positionMs) { vm.resumeAlbum(album); onPlayed() }
+                }
+            }
             itemsIndexed(album.tracks, key = { _, t -> t.path }) { i, t ->
                 TrackRowContent(
                     number = if (t.trackNo > 0) t.trackNo else i + 1,
@@ -251,8 +260,9 @@ fun AlbumDetail(vm: MainViewModel, album: Album, onBack: () -> Unit, onPlayed: (
                     subtitle = t.artist.takeIf { it != null && it != album.artist },
                     durationMs = t.durationMs,
                     playing = pb.path == t.path,
+                    onLongClick = { vm.requestAddToList(listOf(t.path)) },
                 ) {
-                    vm.playTracks(album.tracks, i)
+                    vm.playAlbum(album, i)
                     onPlayed()
                 }
             }

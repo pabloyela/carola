@@ -25,6 +25,13 @@ import com.carola.player.data.CoverRepository
 import com.carola.player.data.CoverRequest
 import com.carola.player.data.Keys
 import com.carola.player.data.LibraryRepository
+import com.carola.player.data.ListEntry
+import com.carola.player.data.ListKind
+import com.carola.player.data.ListsRepository
+import com.carola.player.data.ListsState
+import com.carola.player.data.M3u
+import com.carola.player.data.PlaylistView
+import com.carola.player.data.ResumePoint
 import com.carola.player.data.Listing
 import com.carola.player.data.Palettes
 import com.carola.player.data.Prefs
@@ -144,10 +151,114 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _query.value = q
     }
 
+    // ---------- Listas ----------
+
+    val listsRepo = ListsRepository(app)
+    val listsState: StateFlow<ListsState> = listsRepo.state
+
+    private val m3uLists: StateFlow<List<PlaylistView>> = library.playlistFiles
+        .map { files -> files.mapNotNull { f -> M3u.read(f, rootFor(f)?.path) } }
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Favoritas, Más escuchadas, tus listas y las .m3u de la USB, en ese orden. */
+    val allLists: StateFlow<List<PlaylistView>> = combine(listsState, m3uLists) { st, m3u ->
+        listOf(
+            PlaylistView("fav", "Favoritas", ListKind.FAVORITES, st.favorites),
+            PlaylistView("top", "Más escuchadas", ListKind.TOP, st.topPaths),
+        ) + st.playlists.map { PlaylistView(it.id, it.name, ListKind.USER, it.paths) } + m3u
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val isFavorite: StateFlow<Boolean> = combine(_playback, listsState) { pb, st ->
+        pb.path != null && pb.path in st.favoriteSet
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    private val _addRequest = MutableStateFlow<List<String>?>(null)
+    /** Canciones esperando a que elijas en qué lista ponerlas (muestra el diálogo). */
+    val addRequest: StateFlow<List<String>?> = _addRequest.asStateFlow()
+
+    fun requestAddToList(paths: List<String>) {
+        if (paths.isNotEmpty()) _addRequest.value = paths
+    }
+
+    fun requestAddCurrentToList() {
+        _playback.value.path?.let { requestAddToList(listOf(it)) }
+    }
+
+    fun requestSaveQueue() {
+        val c = controller ?: return
+        requestAddToList(List(c.mediaItemCount) { c.getMediaItemAt(it).mediaId }.filter { it.isNotEmpty() })
+    }
+
+    fun dismissAddRequest() {
+        _addRequest.value = null
+    }
+
+    fun toggleFavoriteCurrent() {
+        _playback.value.path?.let { listsRepo.toggleFavorite(it) }
+    }
+
+    /** Arma las filas de una lista revisando qué archivos existen (en segundo plano). */
+    suspend fun entries(paths: List<String>): List<ListEntry> = withContext(Dispatchers.IO) {
+        paths.map { p ->
+            val f = File(p)
+            val t = library.find(p)
+            ListEntry(
+                path = p,
+                title = t?.title ?: f.nameWithoutExtension,
+                subtitle = t?.artist ?: f.parentFile?.name,
+                durationMs = t?.durationMs ?: 0,
+                available = f.isFile,
+            )
+        }
+    }
+
+    /** Reproduce las canciones disponibles de una lista, empezando por [startPath] si se indica. */
+    fun playList(entries: List<ListEntry>, startPath: String? = null, shuffle: Boolean = false) {
+        val ok = entries.filter { it.available }.map { File(it.path) }
+        if (ok.isEmpty()) return
+        val idx = startPath?.let { p -> ok.indexOfFirst { it.absolutePath == p } }?.takeIf { it >= 0 }
+        playFiles(ok, idx ?: if (shuffle) Random.nextInt(ok.size) else 0, shuffle)
+    }
+
+    // ---------- Continuar por carpeta / álbum ----------
+
+    fun resumeFor(key: String): ResumePoint? = listsState.value.resume[key]
+
+    fun resumeFolder(dir: File) {
+        val key = folderKey(dir)
+        val r = resumeFor(key) ?: return
+        viewModelScope.launch {
+            var files = withContext(Dispatchers.IO) { AudioFiles.list(dir).files }
+            if (files.none { it.absolutePath == r.path }) {
+                files = withContext(Dispatchers.IO) { mutableListOf<File>().also { AudioFiles.walk(dir, it) } }
+            }
+            val i = files.indexOfFirst { it.absolutePath == r.path }
+            if (i < 0) listsRepo.clearResume(key) else playFiles(files, i, false, r.positionMs, key)
+        }
+    }
+
+    fun resumeAlbum(album: Album) {
+        val key = albumKey(album)
+        val r = resumeFor(key) ?: return
+        val i = album.tracks.indexOfFirst { it.path == r.path }
+        if (i < 0) {
+            listsRepo.clearResume(key)
+        } else {
+            playFiles(album.tracks.map { File(it.path) }, i, false, r.positionMs, key)
+        }
+    }
+
+    fun folderKey(dir: File) = "dir:" + dir.absolutePath
+    fun albumKey(album: Album) = "album:" + album.key
+
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var started = false
     private var restored = false
+    private var queueContext: String? = prefs.savedContext
+    private var countedPath: String? = null
+    private var countedDone = false
     private var queueVersion = 0
     private var currentCoverKey: String? = null
     private var coverJob: Job? = null
@@ -193,6 +304,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val c = controller ?: continue
                 if (c.isPlaying) {
                     _playback.update { it.copy(positionMs = c.currentPosition, durationMs = durationOf(c)) }
+                    countPlay(c)
                     if (++ticks % 10 == 0) saveState()
                 }
             }
@@ -227,6 +339,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             c.addListener(object : Player.Listener {
                 override fun onEvents(player: Player, events: Player.Events) {
                     if (events.contains(Player.EVENT_TIMELINE_CHANGED)) queueVersion++
+                    if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) &&
+                        player.playbackState == Player.STATE_ENDED
+                    ) {
+                        queueContext?.let { listsRepo.clearResume(it) } // terminó: ya no hay qué continuar
+                    }
                     update()
                     if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
                         (events.contains(Player.EVENT_IS_PLAYING_CHANGED) && !player.isPlaying)
@@ -297,13 +414,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Reproducción ----------
 
-    fun playFiles(files: List<File>, start: Int = 0, shuffle: Boolean = false) {
+    fun playFiles(
+        files: List<File>,
+        start: Int = 0,
+        shuffle: Boolean = false,
+        startPositionMs: Long = 0L,
+        context: String? = null,
+    ) {
         val c = controller ?: return
         if (files.isEmpty()) return
+        queueContext = context
+        prefs.savedContext = context
         viewModelScope.launch {
             val items = withContext(Dispatchers.Default) { files.map(::mediaItem) }
             c.shuffleModeEnabled = shuffle
-            c.setMediaItems(items, start.coerceIn(0, items.lastIndex), 0L)
+            c.setMediaItems(items, start.coerceIn(0, items.lastIndex), startPositionMs)
             c.prepare()
             c.play()
             restored = true
@@ -312,11 +437,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun playTracks(tracks: List<Track>, start: Int = 0, shuffle: Boolean = false) {
+    fun playTracks(tracks: List<Track>, start: Int = 0, shuffle: Boolean = false, context: String? = null) {
         if (tracks.isEmpty()) return
         val files = tracks.map { File(it.path) }
-        playFiles(files, if (shuffle) Random.nextInt(files.size) else start, shuffle)
+        playFiles(files, if (shuffle) Random.nextInt(files.size) else start, shuffle, context = context)
     }
+
+    fun playAlbum(album: Album, start: Int = 0, shuffle: Boolean = false) =
+        playTracks(album.tracks, start, shuffle, albumKey(album))
 
     fun playFolder(dir: File, shuffle: Boolean, recursive: Boolean) {
         viewModelScope.launch {
@@ -325,7 +453,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 else AudioFiles.list(dir).files
             }
             if (files.isNotEmpty()) {
-                playFiles(files, if (shuffle) Random.nextInt(files.size) else 0, shuffle)
+                playFiles(files, if (shuffle) Random.nextInt(files.size) else 0, shuffle, context = folderKey(dir))
             }
         }
     }
@@ -460,11 +588,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Guardar / reanudar ----------
 
+    /** Cuenta una reproducción al escuchar la mitad de la canción (o 4 minutos). */
+    private fun countPlay(c: Player) {
+        val path = c.currentMediaItem?.mediaId?.takeIf { it.isNotEmpty() } ?: return
+        val pos = c.currentPosition
+        if (path != countedPath || (countedDone && pos < 3000)) {
+            countedPath = path
+            countedDone = false
+        }
+        if (countedDone) return
+        val dur = durationOf(c)
+        val needed = if (dur > 0) minOf(dur / 2, 240_000L) else 240_000L
+        if (pos >= needed) {
+            countedDone = true
+            listsRepo.addPlay(path)
+        }
+    }
+
     private fun saveState() {
         val c = controller ?: return
         if (c.mediaItemCount == 0) return
         prefs.savedIndex = c.currentMediaItemIndex
         prefs.savedPosition = c.currentPosition
+        val ctx = queueContext
+        val path = c.currentMediaItem?.mediaId
+        if (ctx != null && !path.isNullOrEmpty() && !c.shuffleModeEnabled && c.playbackState != Player.STATE_ENDED) {
+            listsRepo.setResume(ctx, path, c.currentPosition)
+        }
         prefs.savedShuffle = c.shuffleModeEnabled
         prefs.savedRepeat = c.repeatMode
     }
