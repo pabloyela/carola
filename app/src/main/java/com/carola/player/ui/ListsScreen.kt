@@ -212,28 +212,6 @@ private fun ListDetail(vm: MainViewModel, list: PlaylistView, onBack: () -> Unit
             else -> LazyColumn(contentPadding = PaddingValues(vertical = 6.dp)) {
                 itemsIndexed(loaded, key = { i, e -> "$i|${e.path}" }) { i, e ->
                     val accent = MaterialTheme.colorScheme.primary
-                    val trailing: (@Composable () -> Unit)? = when (list.kind) {
-                        ListKind.USER -> @Composable {
-                            BigIconButton(
-                                Icons.Rounded.Close, { vm.listsRepo.removeAt(list.id, i) },
-                                size = 48.dp, tint = Color.White.copy(alpha = 0.5f),
-                            )
-                        }
-                        ListKind.FAVORITES -> @Composable {
-                            BigIconButton(
-                                Icons.Rounded.Favorite, { vm.listsRepo.removeFavorite(e.path) },
-                                size = 48.dp, tint = accent,
-                            )
-                        }
-                        ListKind.TOP -> @Composable {
-                            Text(
-                                "${state.counts[e.path] ?: 0}×", fontSize = 15.sp,
-                                color = Color.White.copy(alpha = 0.5f),
-                                modifier = Modifier.padding(start = 12.dp),
-                            )
-                        }
-                        ListKind.M3U -> null
-                    }
                     TrackRowContent(
                         number = i + 1,
                         title = e.title,
@@ -243,7 +221,24 @@ private fun ListDetail(vm: MainViewModel, list: PlaylistView, onBack: () -> Unit
                         enabled = e.available,
                         onClick = { vm.playList(loaded, e.path); onPlayed() },
                         onLongClick = if (e.available) ({ vm.requestAddToList(listOf(e.path)) }) else null,
-                        trailing = trailing,
+                        trailing = {
+                            when (list.kind) {
+                                ListKind.USER -> BigIconButton(
+                                    Icons.Rounded.Close, { vm.listsRepo.removeAt(list.id, i) },
+                                    size = 48.dp, tint = Color.White.copy(alpha = 0.5f),
+                                )
+                                ListKind.FAVORITES -> BigIconButton(
+                                    Icons.Rounded.Favorite, { vm.listsRepo.removeFavorite(e.path) },
+                                    size = 48.dp, tint = accent,
+                                )
+                                ListKind.TOP -> Text(
+                                    "${state.counts[e.path] ?: 0}×", fontSize = 15.sp,
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    modifier = Modifier.padding(start = 12.dp),
+                                )
+                                ListKind.M3U -> Unit
+                            }
+                        },
                     )
                 }
             }

@@ -331,7 +331,7 @@ fun TrackRowContent(
     playing: Boolean,
     enabled: Boolean = true,
     onLongClick: (() -> Unit)? = null,
-    trailing: (@Composable () -> Unit)? = null,
+    trailing: @Composable () -> Unit = {},
     onClick: () -> Unit,
 ) {
     val accent = MaterialTheme.colorScheme.primary
@@ -366,7 +366,7 @@ fun TrackRowContent(
         if (durationMs > 0) {
             Text(formatTime(durationMs), fontSize = 15.sp, color = Color.White.copy(alpha = 0.5f))
         }
-        trailing?.invoke()
+        trailing()
     }
 }
 
