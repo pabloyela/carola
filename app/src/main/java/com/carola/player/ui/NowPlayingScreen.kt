@@ -114,6 +114,7 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                             Modifier.fillMaxSize()
                                 .shadow(28.dp, RoundedCornerShape(22.dp))
                                 .clip(RoundedCornerShape(22.dp)),
+                            spinning = pb.isPlaying,
                         )
                     }
                 }

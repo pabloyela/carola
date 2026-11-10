@@ -1,5 +1,9 @@
 package com.carola.player.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -22,6 +26,8 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -30,7 +36,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -43,6 +53,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.carola.player.data.CoverRepository
 import com.carola.player.data.CoverRequest
+import kotlinx.coroutines.isActive
 import java.io.File
 
 val LocalCovers = staticCompositionLocalOf<CoverRepository> { error("CoverRepository no disponible") }
@@ -51,20 +62,75 @@ private val placeholderBrush = Brush.linearGradient(listOf(Color(0xFF2A2C35), Co
 
 /** Muestra una imagen de archivo o un disco de relleno si no hay portada. */
 @Composable
-fun FileImage(file: File?, modifier: Modifier = Modifier) {
+fun FileImage(file: File?, modifier: Modifier = Modifier, spinning: Boolean = false) {
+    if (file == null) {
+        VinylPlaceholder(modifier, spinning)
+        return
+    }
     Box(modifier.background(placeholderBrush), contentAlignment = Alignment.Center) {
-        if (file == null) {
-            Icon(
-                Icons.Rounded.Album, contentDescription = null,
-                tint = Color.White.copy(alpha = 0.25f),
-                modifier = Modifier.fillMaxSize(0.42f),
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current).data(file).crossfade(true).build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * Disco de vinil que se muestra cuando no hay portada.
+ * Con [spinning] gira despacio (solo se rota la capa: casi no gasta procesador).
+ */
+@Composable
+fun VinylPlaceholder(modifier: Modifier = Modifier, spinning: Boolean = false) {
+    val accent = MaterialTheme.colorScheme.primary
+    val angle = remember { Animatable(0f) }
+    LaunchedEffect(spinning) {
+        if (spinning) {
+            while (isActive) {
+                angle.animateTo(angle.value + 360f, tween(6000, easing = LinearEasing))
+                angle.snapTo(angle.value % 360f)
+            }
+        }
+    }
+    Box(modifier.background(placeholderBrush), contentAlignment = Alignment.Center) {
+        // Disco (gira)
+        Canvas(Modifier.fillMaxSize(0.86f).graphicsLayer { rotationZ = angle.value }) {
+            val r = size.minDimension / 2f
+            val c = center
+            drawCircle(Color(0xFF0B0B0E), r, c)
+            var g = r * 0.95f
+            while (g > r * 0.40f) {
+                drawCircle(Color.White.copy(alpha = 0.045f), g, c, style = Stroke(width = r * 0.006f))
+                g -= r * 0.045f
+            }
+            drawCircle(Color.White.copy(alpha = 0.08f), r, c, style = Stroke(width = r * 0.012f))
+            // Etiqueta central con el color del tema; mitad más oscura para que se note el giro
+            val lr = r * 0.33f
+            drawCircle(accent, lr, c)
+            drawArc(
+                color = Color.Black.copy(alpha = 0.22f),
+                startAngle = -90f, sweepAngle = 180f, useCenter = true,
+                topLeft = Offset(c.x - lr, c.y - lr), size = Size(lr * 2, lr * 2),
             )
-        } else {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(file).crossfade(true).build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+            drawCircle(Color.White.copy(alpha = 0.85f), r * 0.03f, Offset(c.x, c.y - r * 0.22f))
+            drawCircle(Color.Black.copy(alpha = 0.25f), lr, c, style = Stroke(width = r * 0.01f))
+            drawCircle(Color(0xFF16171C), r * 0.045f, c)
+        }
+        // Brillo de luz (no gira, como un reflejo real)
+        Canvas(Modifier.fillMaxSize(0.86f)) {
+            val r = size.minDimension / 2f
+            drawCircle(
+                brush = Brush.sweepGradient(
+                    listOf(
+                        Color.Transparent, Color.White.copy(alpha = 0.08f), Color.Transparent,
+                        Color.Transparent, Color.White.copy(alpha = 0.06f), Color.Transparent,
+                    ),
+                    center,
+                ),
+                radius = r * 0.68f,
+                center = center,
+                style = Stroke(width = r * 0.56f),
             )
         }
     }

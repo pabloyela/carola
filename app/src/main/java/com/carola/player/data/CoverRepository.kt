@@ -13,6 +13,8 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,6 +53,18 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
                     _version.value = _version.value + 1
                 }
             })
+        }
+    }
+
+    @Volatile private var retryScheduled = false
+
+    private fun scheduleRetry() {
+        if (retryScheduled) return
+        retryScheduled = true
+        scope.launch {
+            delay(21_000)
+            retryScheduled = false
+            refresh()
         }
     }
 
@@ -140,7 +154,11 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
                 }
             }
             MusicBrainzClient.Result.NotFound -> runCatching { miss.writeText("") }
-            MusicBrainzClient.Result.Error -> offlineUntil = System.currentTimeMillis() + 60_000
+            MusicBrainzClient.Result.Error -> {
+                // Internet lento o caído: pausar un momento y reintentar solo
+                offlineUntil = System.currentTimeMillis() + 20_000
+                scheduleRetry()
+            }
         }
         return null
     }
