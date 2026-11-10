@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -89,7 +90,7 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
     }
 
     val accent = MaterialTheme.colorScheme.primary
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         // Fondo: la portada en muy baja resolución estirada = efecto desenfocado
         if (cover != null) {
             AsyncImage(
@@ -105,8 +106,14 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
             )
         )
 
+        // Pantallas bajas (teléfono en horizontal, algunos radios): todo más compacto para que quepa
+        val compact = maxHeight < 480.dp
+        val playSize = if (compact) 80.dp else 100.dp
+        val skipSize = if (compact) 62.dp else 76.dp
+        val sideSize = if (compact) 48.dp else 56.dp
+
         Row(
-            Modifier.fillMaxSize().padding(horizontal = 36.dp, vertical = 28.dp),
+            Modifier.fillMaxSize().padding(horizontal = if (compact) 24.dp else 36.dp, vertical = if (compact) 14.dp else 28.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true)) {
@@ -125,29 +132,54 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                 }
             }
 
-            Spacer(Modifier.width(40.dp))
+            Spacer(Modifier.width(if (compact) 24.dp else 40.dp))
 
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                // Fila superior: álbum + favorito, agregar a lista y cola
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            pb.album.uppercase(), color = accent, fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "Pista ${pb.index + 1} de ${pb.count}",
+                            fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f),
+                        )
+                    }
+                    BigIconButton(
+                        if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        vm::toggleFavoriteCurrent, size = 52.dp,
+                        tint = if (favorite) accent else Color.White.copy(alpha = 0.7f),
+                    )
+                    BigIconButton(
+                        Icons.AutoMirrored.Rounded.PlaylistAdd, vm::requestAddCurrentToList, size = 52.dp,
+                        tint = Color.White.copy(alpha = 0.7f),
+                    )
+                    BigIconButton(
+                        Icons.AutoMirrored.Rounded.QueueMusic, { showQueue = !showQueue }, size = 52.dp,
+                        tint = if (showQueue) accent else Color.White.copy(alpha = 0.7f),
+                    )
+                }
+                Spacer(Modifier.height(if (compact) 4.dp else 10.dp))
                 Text(
-                    pb.album.uppercase(), color = accent, fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    pb.title,
+                    fontSize = if (compact) 26.sp else 34.sp,
+                    lineHeight = if (compact) 31.sp else 40.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(if (compact) 2.dp else 6.dp))
                 Text(
-                    pb.title, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    pb.artist.ifEmpty { " " }, fontSize = 22.sp,
+                    pb.artist.ifEmpty { " " }, fontSize = if (compact) 19.sp else 22.sp,
                     color = Color.White.copy(alpha = 0.72f),
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
 
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(if (compact) 8.dp else 24.dp))
                 SeekBar(pb, onSeek = vm::seek)
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(if (compact) 4.dp else 14.dp))
 
                 Row(
                     Modifier.fillMaxWidth(),
@@ -155,44 +187,20 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     BigIconButton(
-                        Icons.Rounded.Shuffle, vm::toggleShuffle, size = 56.dp,
+                        Icons.Rounded.Shuffle, vm::toggleShuffle, size = sideSize,
                         tint = if (pb.shuffle) accent else Color.White.copy(alpha = 0.45f),
                     )
-                    BigIconButton(Icons.Rounded.SkipPrevious, vm::previous, size = 76.dp, iconScale = 0.62f)
+                    BigIconButton(Icons.Rounded.SkipPrevious, vm::previous, size = skipSize, iconScale = 0.62f)
                     BigIconButton(
                         if (pb.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        vm::togglePlay, size = 100.dp, iconScale = 0.56f,
+                        vm::togglePlay, size = playSize, iconScale = 0.56f,
                         tint = MaterialTheme.colorScheme.onPrimary, background = accent,
                     )
-                    BigIconButton(Icons.Rounded.SkipNext, vm::next, size = 76.dp, iconScale = 0.62f)
+                    BigIconButton(Icons.Rounded.SkipNext, vm::next, size = skipSize, iconScale = 0.62f)
                     BigIconButton(
                         if (pb.repeatMode == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                        vm::cycleRepeat, size = 56.dp,
+                        vm::cycleRepeat, size = sideSize,
                         tint = if (pb.repeatMode != Player.REPEAT_MODE_OFF) accent else Color.White.copy(alpha = 0.45f),
-                    )
-                }
-
-                Spacer(Modifier.height(14.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Pista ${pb.index + 1} de ${pb.count}",
-                        fontSize = 15.sp, color = Color.White.copy(alpha = 0.55f),
-                        modifier = Modifier.weight(1f),
-                    )
-                    BigIconButton(
-                        if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        vm::toggleFavoriteCurrent, size = 52.dp,
-                        tint = if (favorite) accent else Color.White.copy(alpha = 0.6f),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    BigIconButton(
-                        Icons.AutoMirrored.Rounded.PlaylistAdd, vm::requestAddCurrentToList, size = 52.dp,
-                        tint = Color.White.copy(alpha = 0.6f),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    BigIconButton(
-                        Icons.AutoMirrored.Rounded.QueueMusic, { showQueue = !showQueue }, size = 52.dp,
-                        tint = if (showQueue) accent else Color.White.copy(alpha = 0.6f),
                     )
                 }
             }
