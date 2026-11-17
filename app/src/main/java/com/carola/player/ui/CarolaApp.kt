@@ -63,6 +63,7 @@ enum class Tab(val label: String, val icon: ImageVector) {
 fun CarolaApp(vm: MainViewModel) {
     val pb by vm.playback.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val big by vm.bigPlayer.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.FOLDERS) }
     var autoOpened by rememberSaveable { mutableStateOf(false) }
 
@@ -76,31 +77,35 @@ fun CarolaApp(vm: MainViewModel) {
 
     CompositionLocalProvider(LocalCovers provides vm.covers) {
         Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            NavigationRail(containerColor = RailColor, modifier = Modifier.fillMaxHeight()) {
-              Column(
-                  Modifier.fillMaxHeight().verticalScroll(rememberScrollState()),
-                  horizontalAlignment = Alignment.CenterHorizontally,
-              ) {
-                Spacer(Modifier.height(4.dp))
-                Tab.entries.forEach { t ->
-                    NavigationRailItem(
-                        selected = tab == t,
-                        onClick = { tab = t },
-                        icon = { Icon(t.icon, contentDescription = t.label, modifier = Modifier.size(28.dp)) },
-                        label = { Text(t.label, fontSize = 13.sp) },
-                        colors = NavigationRailItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            unselectedIconColor = Color.White.copy(alpha = 0.55f),
-                            unselectedTextColor = Color.White.copy(alpha = 0.55f),
-                        ),
-                    )
-                    Spacer(Modifier.height(2.dp))
+            // En la vista grande de Sonando se oculta el menú lateral
+            val fullScreen = tab == Tab.NOW && big && pb.hasMedia
+            if (!fullScreen) {
+                NavigationRail(containerColor = RailColor, modifier = Modifier.fillMaxHeight()) {
+                  Column(
+                      Modifier.fillMaxHeight().verticalScroll(rememberScrollState()),
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                  ) {
+                    Spacer(Modifier.height(4.dp))
+                    Tab.entries.forEach { t ->
+                        NavigationRailItem(
+                            selected = tab == t,
+                            onClick = { tab = t },
+                            icon = { Icon(t.icon, contentDescription = t.label, modifier = Modifier.size(28.dp)) },
+                            label = { Text(t.label, fontSize = 13.sp) },
+                            colors = NavigationRailItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                unselectedIconColor = Color.White.copy(alpha = 0.55f),
+                                unselectedTextColor = Color.White.copy(alpha = 0.55f),
+                            ),
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    CoverToggle(settings.onlineCovers) { vm.setOnlineCovers(!settings.onlineCovers) }
+                    Spacer(Modifier.height(8.dp))
+                  }
                 }
-                Spacer(Modifier.height(6.dp))
-                CoverToggle(settings.onlineCovers) { vm.setOnlineCovers(!settings.onlineCovers) }
-                Spacer(Modifier.height(8.dp))
-              }
             }
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 Box(Modifier.weight(1f)) {

@@ -43,6 +43,7 @@ import com.carola.player.data.StorageRoots
 import com.carola.player.data.Track
 import com.carola.player.data.buildAlbums
 import com.carola.player.data.buildArtists
+import com.carola.player.player.Eq
 import com.carola.player.player.PlaybackService
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +83,8 @@ data class PlaybackUi(
     val count: Int = 0,
     val queueVersion: Int = 0,
 )
+
+data class EqUi(val preset: String, val gains: List<Float>)
 
 data class SettingsUi(
     val onlineCovers: Boolean,
@@ -665,6 +668,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prefs.scanWholeUsb = v
         _settings.value = _settings.value.copy(scanWholeUsb = v)
         rescan()
+    }
+
+    // ---------- Ecualizador ----------
+
+    private val _eq = MutableStateFlow(EqUi(prefs.eqPreset, Eq.parse(prefs.eqGains).toList()))
+    val eq: StateFlow<EqUi> = _eq.asStateFlow()
+
+    fun setEqPreset(name: String) {
+        val g = Eq.PRESETS.firstOrNull { it.first == name }?.second ?: return
+        saveEq(name, g.toList())
+    }
+
+    fun setEqBand(index: Int, db: Float) {
+        val g = _eq.value.gains.toMutableList()
+        if (index !in g.indices) return
+        g[index] = (Math.round(db * 2f) / 2f).coerceIn(-Eq.MAX_DB, Eq.MAX_DB) // pasos de 0.5 dB
+        val match = Eq.PRESETS.firstOrNull { it.second.toList() == g }?.first
+        saveEq(match ?: Eq.CUSTOM, g)
+    }
+
+    private fun saveEq(preset: String, gains: List<Float>) {
+        _eq.value = EqUi(preset, gains)
+        prefs.eqPreset = preset
+        prefs.eqGains = Eq.format(gains.toFloatArray()) // el servicio de reproducción escucha este cambio
+    }
+
+    // ---------- Vista grande ----------
+
+    private val _bigPlayer = MutableStateFlow(prefs.bigPlayer)
+    val bigPlayer: StateFlow<Boolean> = _bigPlayer.asStateFlow()
+
+    fun setBigPlayer(v: Boolean) {
+        prefs.bigPlayer = v
+        _bigPlayer.value = v
     }
 
     fun setNormalize(v: Boolean) {

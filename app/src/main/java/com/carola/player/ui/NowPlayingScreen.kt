@@ -1,8 +1,12 @@
 package com.carola.player.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +30,9 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -67,6 +74,7 @@ import coil.request.ImageRequest
 import com.carola.player.MainViewModel
 import com.carola.player.PlaybackUi
 import com.carola.player.data.formatTime
+import com.carola.player.player.Eq
 import java.io.File
 
 @Composable
@@ -74,7 +82,8 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
     val pb by vm.playback.collectAsStateWithLifecycle()
     val cover by vm.cover.collectAsStateWithLifecycle()
     val favorite by vm.isFavorite.collectAsStateWithLifecycle()
-    var showQueue by remember { mutableStateOf(false) }
+    val big by vm.bigPlayer.collectAsStateWithLifecycle()
+    var panel by remember { mutableStateOf(Panel.COVER) }
 
     if (!pb.hasMedia) {
         EmptyState(
@@ -112,16 +121,18 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
         val skipSize = if (compact) 62.dp else 76.dp
         val sideSize = if (compact) 48.dp else 56.dp
 
-        Row(
+        if (big) {
+            BigPlayer(vm, pb, cover, favorite, compact)
+        } else Row(
             Modifier.fillMaxSize().padding(horizontal = if (compact) 24.dp else 36.dp, vertical = if (compact) 14.dp else 28.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true)) {
-                Crossfade(targetState = showQueue, modifier = Modifier.fillMaxSize(), label = "queue") { queue ->
-                    if (queue) {
-                        QueuePanel(vm, pb, Modifier.fillMaxSize())
-                    } else {
-                        FileImage(
+                Crossfade(targetState = panel, modifier = Modifier.fillMaxSize(), label = "panel") { p ->
+                    when (p) {
+                        Panel.QUEUE -> QueuePanel(vm, pb, Modifier.fillMaxSize())
+                        Panel.EQ -> EqPanel(vm, Modifier.fillMaxSize())
+                        Panel.COVER -> FileImage(
                             cover,
                             Modifier.fillMaxSize()
                                 .shadow(28.dp, RoundedCornerShape(22.dp))
@@ -150,16 +161,25 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                     }
                     BigIconButton(
                         if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        vm::toggleFavoriteCurrent, size = 52.dp,
+                        vm::toggleFavoriteCurrent, size = 48.dp,
                         tint = if (favorite) accent else Color.White.copy(alpha = 0.7f),
                     )
                     BigIconButton(
-                        Icons.AutoMirrored.Rounded.PlaylistAdd, vm::requestAddCurrentToList, size = 52.dp,
+                        Icons.AutoMirrored.Rounded.PlaylistAdd, vm::requestAddCurrentToList, size = 48.dp,
                         tint = Color.White.copy(alpha = 0.7f),
                     )
                     BigIconButton(
-                        Icons.AutoMirrored.Rounded.QueueMusic, { showQueue = !showQueue }, size = 52.dp,
-                        tint = if (showQueue) accent else Color.White.copy(alpha = 0.7f),
+                        Icons.Rounded.Tune, { panel = if (panel == Panel.EQ) Panel.COVER else Panel.EQ }, size = 48.dp,
+                        tint = if (panel == Panel.EQ) accent else Color.White.copy(alpha = 0.7f),
+                    )
+                    BigIconButton(
+                        Icons.AutoMirrored.Rounded.QueueMusic,
+                        { panel = if (panel == Panel.QUEUE) Panel.COVER else Panel.QUEUE }, size = 48.dp,
+                        tint = if (panel == Panel.QUEUE) accent else Color.White.copy(alpha = 0.7f),
+                    )
+                    BigIconButton(
+                        Icons.Rounded.Fullscreen, { vm.setBigPlayer(true) }, size = 48.dp,
+                        tint = Color.White.copy(alpha = 0.7f),
                     )
                 }
                 Spacer(Modifier.height(if (compact) 4.dp else 10.dp))
@@ -203,6 +223,154 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                         tint = if (pb.repeatMode != Player.REPEAT_MODE_OFF) accent else Color.White.copy(alpha = 0.45f),
                     )
                 }
+            }
+        }
+    }
+}
+
+private enum class Panel { COVER, QUEUE, EQ }
+
+/** Vista grande: sin menú lateral, portada enorme y botones gigantes. Toca la portada para más opciones. */
+@Composable
+private fun BigPlayer(vm: MainViewModel, pb: PlaybackUi, cover: File?, favorite: Boolean, compact: Boolean) {
+    val accent = MaterialTheme.colorScheme.primary
+    var extras by remember { mutableStateOf(false) }
+    BackHandler { vm.setBigPlayer(false) }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = if (compact) 12.dp else 24.dp)) {
+            Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                FileImage(
+                    cover,
+                    Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true)
+                        .shadow(30.dp, RoundedCornerShape(26.dp))
+                        .clip(RoundedCornerShape(26.dp))
+                        .clickable { extras = !extras },
+                    spinning = pb.isPlaying,
+                )
+                Spacer(Modifier.width(if (compact) 22.dp else 40.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        pb.title,
+                        fontSize = if (compact) 30.sp else 46.sp,
+                        lineHeight = if (compact) 35.sp else 52.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        pb.artist.ifEmpty { " " }, fontSize = if (compact) 21.sp else 28.sp,
+                        color = Color.White.copy(alpha = 0.75f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    if (!compact) {
+                        Text(
+                            pb.album, fontSize = 18.sp, color = accent,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(if (compact) 8.dp else 20.dp))
+                    SeekBar(pb, onSeek = vm::seek)
+                    if (extras) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            BigIconButton(
+                                Icons.Rounded.Shuffle, vm::toggleShuffle, size = 52.dp,
+                                tint = if (pb.shuffle) accent else Color.White.copy(alpha = 0.5f),
+                            )
+                            BigIconButton(
+                                if (pb.repeatMode == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                                vm::cycleRepeat, size = 52.dp,
+                                tint = if (pb.repeatMode != Player.REPEAT_MODE_OFF) accent else Color.White.copy(alpha = 0.5f),
+                            )
+                            BigIconButton(
+                                if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                vm::toggleFavoriteCurrent, size = 52.dp,
+                                tint = if (favorite) accent else Color.White.copy(alpha = 0.7f),
+                            )
+                            BigIconButton(
+                                Icons.AutoMirrored.Rounded.PlaylistAdd, vm::requestAddCurrentToList, size = 52.dp,
+                                tint = Color.White.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(if (compact) 6.dp else 16.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BigIconButton(Icons.Rounded.SkipPrevious, vm::previous, size = if (compact) 80.dp else 108.dp, iconScale = 0.64f)
+                BigIconButton(
+                    if (pb.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    vm::togglePlay, size = if (compact) 96.dp else 136.dp, iconScale = 0.58f,
+                    tint = MaterialTheme.colorScheme.onPrimary, background = accent,
+                )
+                BigIconButton(Icons.Rounded.SkipNext, vm::next, size = if (compact) 80.dp else 108.dp, iconScale = 0.64f)
+            }
+        }
+        Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+            BigIconButton(
+                Icons.Rounded.FullscreenExit, { vm.setBigPlayer(false) }, size = 52.dp,
+                tint = Color.White.copy(alpha = 0.75f), background = Color.Black.copy(alpha = 0.3f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EqPanel(vm: MainViewModel, modifier: Modifier) {
+    val eq by vm.eq.collectAsStateWithLifecycle()
+    val accent = MaterialTheme.colorScheme.primary
+    Column(
+        modifier.clip(RoundedCornerShape(22.dp)).background(Color.Black.copy(alpha = 0.6f))
+            .verticalScroll(rememberScrollState()).padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Ecualizador", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(eq.preset, fontSize = 15.sp, color = accent, fontWeight = FontWeight.SemiBold)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Eq.PRESETS.forEach { (name, _) ->
+                val selected = eq.preset == name
+                Box(
+                    Modifier.clip(RoundedCornerShape(20.dp))
+                        .background(if (selected) accent else Color.White.copy(alpha = 0.1f))
+                        .clickable { vm.setEqPreset(name) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        name, fontSize = 15.sp,
+                        color = if (selected) MaterialTheme.colorScheme.onPrimary else Color.White,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Eq.BANDS.forEachIndexed { i, band ->
+            val g = eq.gains.getOrElse(i) { 0f }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(band.label, fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.width(62.dp))
+                Slider(
+                    value = g,
+                    onValueChange = { vm.setEqBand(i, it) },
+                    valueRange = -Eq.MAX_DB..Eq.MAX_DB,
+                    colors = SliderDefaults.colors(
+                        thumbColor = accent,
+                        activeTrackColor = accent,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.18f),
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "%+.1f".format(g), fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.width(44.dp).padding(start = 6.dp),
+                )
             }
         }
     }

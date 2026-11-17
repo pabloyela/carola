@@ -18,6 +18,19 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("normalize", true)
         set(v) = sp.edit().putBoolean("normalize", v).apply()
 
+    /** Ganancias del ecualizador "g1,g2,g3,g4,g5" (el servicio de audio escucha este valor). */
+    var eqGains: String?
+        get() = sp.getString("eq_gains", null)
+        set(v) = sp.edit().putString("eq_gains", v).apply()
+
+    var eqPreset: String
+        get() = sp.getString("eq_preset", null) ?: "Normal"
+        set(v) = sp.edit().putString("eq_preset", v).apply()
+
+    var bigPlayer: Boolean
+        get() = sp.getBoolean("big_player", false)
+        set(v) = sp.edit().putBoolean("big_player", v).apply()
+
     var scanWholeUsb: Boolean
         get() = sp.getBoolean("scan_whole_usb", true)
         set(v) = sp.edit().putBoolean("scan_whole_usb", v).apply()

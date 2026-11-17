@@ -28,6 +28,7 @@ class PlaybackService : MediaSessionService() {
     private lateinit var prefs: SharedPreferences
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
         if (key == "normalize") normalizer.setEnabled(sp.getBoolean("normalize", true))
+        if (key == "eq_gains") normalizer.setEq(Eq.parse(sp.getString("eq_gains", null)))
     }
 
     override fun onCreate() {
@@ -45,6 +46,7 @@ class PlaybackService : MediaSessionService() {
         // Nivelación de volumen
         prefs = getSharedPreferences("carola", MODE_PRIVATE)
         normalizer.setEnabled(prefs.getBoolean("normalize", true))
+        normalizer.setEq(Eq.parse(prefs.getString("eq_gains", null)))
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         normalizer.attach(player.audioSessionId)
         player.addListener(object : Player.Listener {
