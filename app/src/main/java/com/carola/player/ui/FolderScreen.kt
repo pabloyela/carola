@@ -162,6 +162,7 @@ private fun FolderContent(
                         dir = d,
                         hasMusic = d.absolutePath in listing.musicDirs,
                         marked = d.absolutePath in musicFolders,
+                        onLongClick = { vm.openFolderMenu(d) },
                     ) { vm.openFolder(d) }
                 }
                 itemsIndexed(listing.files, key = { _, f -> "f" + f.absolutePath }) { i, f ->
@@ -170,7 +171,7 @@ private fun FolderContent(
                         number = i + 1,
                         track = vm.library.find(f.absolutePath),
                         playing = playingPath == f.absolutePath,
-                        onLongClick = { vm.requestAddToList(listOf(f.absolutePath)) },
+                        onLongClick = { vm.openTrackMenu(f.absolutePath) },
                     ) {
                         vm.playFiles(listing.files, i, context = vm.folderKey(dir))
                         onPlayed()
@@ -265,11 +266,20 @@ private fun BigRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FolderRow(dir: File, hasMusic: Boolean, marked: Boolean, onClick: () -> Unit) {
+private fun FolderRow(
+    dir: File,
+    hasMusic: Boolean,
+    marked: Boolean,
+    onLongClick: () -> Unit,
+    onClick: () -> Unit,
+) {
     val accent = MaterialTheme.colorScheme.primary
     Row(
-        Modifier.fillMaxWidth().height(70.dp).clickable(onClick = onClick).padding(horizontal = 24.dp),
+        Modifier.fillMaxWidth().height(70.dp)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(

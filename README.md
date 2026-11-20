@@ -59,3 +59,15 @@ Abre la carpeta `Carola` en Android Studio (versión Koala o más reciente), esp
 | `player/PlaybackService.kt` | Reproductor en segundo plano (Media3/ExoPlayer) |
 | `MainViewModel.kt` | Une todo: cola, estado, reanudar, portada actual |
 | `ui/*` | Pantallas (Sonando, Carpetas, Álbumes, Artistas, Ajustes) |
+
+---
+
+## Historial de versiones
+
+| Versión | Estado | Qué trae |
+|---|---|---|
+| 3.2 | 🧪 En prueba | Gestos en la portada, eliminar canciones/carpetas/álbumes, firma fija, guardar/restaurar respaldo |
+| 3.1 | ✅ Estable | Ecualizador (presets + 5 bandas), vista grande de Sonando en pantalla completa |
+| **3.0** | ✅ Estable (probada en el carro, 16-nov-2026) | Favoritas, Más escuchadas, listas propias, listas .m3u de la USB, Continuar por carpeta/álbum, ❤️ y ➕ en Sonando, diseño compacto para pantallas bajas |
+| 2.0 | ✅ Estable | Nivelación de volumen (ReplayGain + nivelador), búsqueda sin acentos |
+| 1.x | ✅ Estable | Reproductor base, carpetas, álbumes, artistas, portadas (MusicBrainz), vinil animado, carpetas de música marcadas |

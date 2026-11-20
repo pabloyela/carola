@@ -220,7 +220,7 @@ private fun ListDetail(vm: MainViewModel, list: PlaylistView, onBack: () -> Unit
                         playing = pb.path == e.path,
                         enabled = e.available,
                         onClick = { vm.playList(loaded, e.path); onPlayed() },
-                        onLongClick = if (e.available) ({ vm.requestAddToList(listOf(e.path)) }) else null,
+                        onLongClick = if (e.available) ({ vm.openTrackMenu(e.path) }) else null,
                         trailing = {
                             when (list.kind) {
                                 ListKind.USER -> BigIconButton(

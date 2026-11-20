@@ -39,7 +39,8 @@ class MainActivity : ComponentActivity() {
     private var granted by mutableStateOf(false)
 
     private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val ok = result[Manifest.permission.READ_EXTERNAL_STORAGE] == true || hasPermission()
             granted = ok
             if (ok) vm.onPermissionGranted()
         }
@@ -47,7 +48,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         granted = hasPermission()
-        if (granted) vm.onPermissionGranted() else askPermission()
+        if (granted) vm.onPermissionGranted()
+        // Lectura (para ver la música) y escritura (para borrar y guardar respaldos)
+        if (!granted || !hasWritePermission()) askPermission()
 
         setContent {
             val accent by vm.accent.collectAsStateWithLifecycle()
@@ -89,8 +92,14 @@ class MainActivity : ComponentActivity() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) ==
             PackageManager.PERMISSION_GRANTED
 
+    private fun hasWritePermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+
     private fun askPermission() {
-        permissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+        permissionLauncher.launch(
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        )
     }
 
     private fun openAppSettings() {

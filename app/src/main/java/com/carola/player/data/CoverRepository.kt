@@ -30,6 +30,15 @@ import java.util.concurrent.ConcurrentHashMap
  *  3. Imagen incrustada en la canción (ID3 / FLAC)
  *  4. MusicBrainz + Cover Art Archive (si hay internet y está activado)
  */
+/** Qué está pasando con la portada de un álbum que todavía no tiene imagen. */
+enum class CoverStatus(val label: String) {
+    SEARCHING("Buscando portada…"),
+    NOT_FOUND("Portada no encontrada"),
+    OFFLINE("Sin internet · reintentará sola"),
+    DISABLED("Búsqueda de portadas apagada"),
+    NO_INFO("Sin datos para buscar la portada"),
+}
+
 class CoverRepository(context: Context, private val prefs: Prefs) {
 
     private val dir = File(context.filesDir, "covers").apply { mkdirs() }
@@ -39,6 +48,14 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
     private val inflight = ConcurrentHashMap<String, Deferred<File?>>()
     @Volatile private var offlineUntil = 0L
     private val cm = context.getSystemService(ConnectivityManager::class.java)
+
+    private val _status = MutableStateFlow<Map<String, CoverStatus>>(emptyMap())
+    /** Estado de búsqueda por álbum (solo los que no tienen portada). */
+    val status: StateFlow<Map<String, CoverStatus>> = _status.asStateFlow()
+
+    private fun mark(key: String, s: CoverStatus?) {
+        _status.value = if (s == null) _status.value - key else _status.value + (key to s)
+    }
 
     private val _version = MutableStateFlow(0)
     /** Cambia cuando conviene volver a intentar portadas (internet volvió, ajuste cambiado...). */
@@ -116,20 +133,33 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
 
     fun clear() {
         resolved.clear()
+        _status.value = emptyMap()
         dir.listFiles()?.forEach { it.delete() }
         refresh()
     }
 
     private suspend fun resolve(req: CoverRequest): File? {
+        val r = resolveInner(req)
+        if (r != null) mark(req.key, null)
+        return r
+    }
+
+    private suspend fun resolveInner(req: CoverRequest): File? {
         val out = cacheFile(req.key)
         if (out.length() > 0) return out
 
         folderImage(req.folder)?.let { return it }
         embedded(req.sample)?.let { bytes -> if (saveScaled(bytes, out)) return out }
 
-        if (!prefs.onlineCovers) return null
-        if (System.currentTimeMillis() < offlineUntil) return null
-        if (!hasInternet()) return null // sin internet: no busca ni marca como "no encontrada"
+        if (!prefs.onlineCovers) {
+            mark(req.key, CoverStatus.DISABLED)
+            return null
+        }
+        if (System.currentTimeMillis() < offlineUntil || !hasInternet()) {
+            // sin internet: no busca ni marca como "no encontrada"
+            mark(req.key, CoverStatus.OFFLINE)
+            return null
+        }
 
         var artist = req.artist?.takeIf { it.isNotBlank() }
         var album = req.album?.takeIf { it.isNotBlank() }
@@ -140,21 +170,33 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
                 album = parsed.second
             }
         }
-        val searchArtist = artist ?: return null
+        val searchArtist = artist ?: run {
+            mark(req.key, CoverStatus.NO_INFO)
+            return null
+        }
 
         val miss = File(dir, hash(req.key) + ".miss")
         val threeDays = 3L * 24 * 3600 * 1000
-        if (miss.exists() && System.currentTimeMillis() - miss.lastModified() < threeDays) return null
+        if (miss.exists() && System.currentTimeMillis() - miss.lastModified() < threeDays) {
+            mark(req.key, CoverStatus.NOT_FOUND)
+            return null
+        }
 
+        mark(req.key, CoverStatus.SEARCHING)
         when (val r = mb.findCover(searchArtist, album, req.title)) {
             is MusicBrainzClient.Result.Found -> {
                 if (saveScaled(r.bytes, out)) {
                     miss.delete()
                     return out
                 }
+                mark(req.key, CoverStatus.NOT_FOUND)
             }
-            MusicBrainzClient.Result.NotFound -> runCatching { miss.writeText("") }
+            MusicBrainzClient.Result.NotFound -> {
+                runCatching { miss.writeText("") }
+                mark(req.key, CoverStatus.NOT_FOUND)
+            }
             MusicBrainzClient.Result.Error -> {
+                mark(req.key, CoverStatus.OFFLINE)
                 // Internet lento o caído: pausar un momento y reintentar solo
                 offlineUntil = System.currentTimeMillis() + 20_000
                 scheduleRetry()

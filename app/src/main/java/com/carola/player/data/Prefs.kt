@@ -31,6 +31,14 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("big_player", false)
         set(v) = sp.edit().putBoolean("big_player", v).apply()
 
+    /** Permisos de escritura por memoria: ruta de la USB -> URI que el usuario autorizó. */
+    var treeUris: Map<String, String>
+        get() = runCatching {
+            val o = org.json.JSONObject(sp.getString("tree_uris", null) ?: "{}")
+            o.keys().asSequence().associateWith { o.getString(it) }
+        }.getOrDefault(emptyMap())
+        set(v) = sp.edit().putString("tree_uris", org.json.JSONObject(v).toString()).apply()
+
     var scanWholeUsb: Boolean
         get() = sp.getBoolean("scan_whole_usb", true)
         set(v) = sp.edit().putBoolean("scan_whole_usb", v).apply()

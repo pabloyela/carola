@@ -1,7 +1,9 @@
 package com.carola.player.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -40,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,7 +90,7 @@ fun AlbumsScreen(vm: MainViewModel, onPlayed: () -> Unit) {
                     }
                 }
             } else {
-                AlbumGrid(albums) { selected = it.key }
+                AlbumGrid(albums, onLongClick = vm::openAlbumMenu) { selected = it.key }
             }
         }
     }
@@ -122,7 +126,7 @@ fun ArtistsScreen(vm: MainViewModel, onPlayed: () -> Unit) {
                     }
                 }
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-                AlbumGrid(artist.albums) { selectedAlbum = it.key }
+                AlbumGrid(artist.albums, onLongClick = vm::openAlbumMenu) { selectedAlbum = it.key }
             }
         }
         else -> {
@@ -178,8 +182,9 @@ private fun ScanProgress(scan: ScanState) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun AlbumGrid(albums: List<Album>, onClick: (Album) -> Unit) {
+fun AlbumGrid(albums: List<Album>, onLongClick: ((Album) -> Unit)? = null, onClick: (Album) -> Unit) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(180.dp),
         contentPadding = PaddingValues(20.dp),
@@ -188,7 +193,12 @@ fun AlbumGrid(albums: List<Album>, onClick: (Album) -> Unit) {
         modifier = Modifier.fillMaxSize(),
     ) {
         items(albums, key = { it.key }) { a ->
-            Column(Modifier.clip(RoundedCornerShape(14.dp)).clickable { onClick(a) }) {
+            Column(
+                Modifier.clip(RoundedCornerShape(14.dp)).combinedClickable(
+                    onClick = { onClick(a) },
+                    onLongClick = onLongClick?.let { f -> { f(a) } },
+                )
+            ) {
                 CoverArt(
                     a.coverRequest(),
                     Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)),
@@ -241,6 +251,12 @@ fun AlbumDetail(vm: MainViewModel, album: Album, onBack: () -> Unit, onPlayed: (
                     Icon(Icons.Rounded.Shuffle, null, Modifier.size(24.dp))
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { vm.openAlbumMenu(album) }) {
+                Icon(Icons.Rounded.MoreHoriz, null, Modifier.size(22.dp), tint = Color.White.copy(alpha = 0.6f))
+                Spacer(Modifier.width(6.dp))
+                Text("Más opciones", fontSize = 15.sp, color = Color.White.copy(alpha = 0.6f))
+            }
         }
         Spacer(Modifier.width(24.dp))
         val lists by vm.listsState.collectAsStateWithLifecycle()
@@ -260,7 +276,7 @@ fun AlbumDetail(vm: MainViewModel, album: Album, onBack: () -> Unit, onPlayed: (
                     subtitle = t.artist.takeIf { it != null && it != album.artist },
                     durationMs = t.durationMs,
                     playing = pb.path == t.path,
-                    onLongClick = { vm.requestAddToList(listOf(t.path)) },
+                    onLongClick = { vm.openTrackMenu(t.path) },
                 ) {
                     vm.playAlbum(album, i)
                     onPlayed()

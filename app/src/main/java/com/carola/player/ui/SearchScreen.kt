@@ -89,7 +89,7 @@ fun SearchScreen(vm: MainViewModel, onPlayed: () -> Unit, onOpenFolder: (File) -
                     }
                 }
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-                AlbumGrid(artist.albums) { selectedAlbum = it.key }
+                AlbumGrid(artist.albums, onLongClick = vm::openAlbumMenu) { selectedAlbum = it.key }
             }
         }
         else -> Column(Modifier.fillMaxSize()) {

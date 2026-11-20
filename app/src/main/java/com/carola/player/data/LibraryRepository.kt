@@ -39,6 +39,14 @@ class LibraryRepository(context: Context) {
 
     fun find(path: String): Track? = cache[path]
 
+    /** Saca de la biblioteca las canciones borradas. */
+    fun remove(paths: Set<String>) {
+        if (paths.isEmpty()) return
+        paths.forEach { cache.remove(it) }
+        _tracks.value = _tracks.value.filter { it.path !in paths }
+        save()
+    }
+
     suspend fun loadCache(): Unit = withContext(Dispatchers.IO) {
         if (cacheLoaded) return@withContext
         cacheLoaded = true

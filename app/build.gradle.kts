@@ -14,14 +14,29 @@ android {
         minSdk = 26
         // targetSdk 28 = Android 9: acceso clásico a las USB por ruta de archivo
         targetSdk = 28
-        versionCode = 4
-        versionName = "3.1"
+        versionCode = 5
+        versionName = "3.2"
+    }
+
+    // Firma fija: todas las versiones salen con la misma llave, así cada APK
+    // nuevo se instala encima del anterior sin desinstalar (y sin perder datos).
+    // Guarda este repositorio como PRIVADO: carola.jks es la llave de la app.
+    signingConfigs {
+        create("carola") {
+            storeFile = file("carola.jks")
+            storePassword = "MN_2sdXLWAuflNE_fkqchN5P"
+            keyAlias = "carola"
+            keyPassword = "MN_2sdXLWAuflNE_fkqchN5P"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("carola")
+        }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("carola")
         }
     }
 
@@ -63,5 +78,6 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.palette:palette-ktx:1.0.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

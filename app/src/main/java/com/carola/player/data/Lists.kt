@@ -131,29 +131,55 @@ class ListsRepository(context: Context) {
         }
     }
 
+    /** Quita de favoritas, listas, conteo y "Continuar" las canciones que se borraron. */
+    fun forget(paths: Set<String>) = change { s ->
+        s.copy(
+            favorites = s.favorites.filter { it !in paths },
+            counts = s.counts.filterKeys { it !in paths },
+            playlists = s.playlists.map { p -> p.copy(paths = p.paths.filter { it !in paths }) },
+            resume = s.resume.filterValues { it.path !in paths },
+        )
+    }
+
+    // ----- Respaldo -----
+
+    fun toJson(): JSONObject = toJson(_state.value)
+
+    /** Reemplaza todo con el contenido de un respaldo. Devuelve false si no se pudo leer. */
+    fun restore(o: JSONObject): Boolean {
+        val st = runCatching { parse(o) }.getOrNull() ?: return false
+        change { st }
+        return true
+    }
+
     private fun write(s: ListsState) {
         runCatching {
-            val o = JSONObject()
-            o.put("fav", JSONArray(s.favorites))
-            o.put("counts", JSONObject().apply { s.counts.forEach { (k, v) -> put(k, v) } })
-            o.put("lists", JSONArray().apply {
-                s.playlists.forEach { p ->
-                    put(JSONObject().put("id", p.id).put("name", p.name).put("paths", JSONArray(p.paths)))
-                }
-            })
-            o.put("resume", JSONObject().apply {
-                s.resume.forEach { (k, r) ->
-                    put(k, JSONObject().put("p", r.path).put("t", r.positionMs).put("u", r.updated))
-                }
-            })
             val tmp = File(file.path + ".tmp")
-            tmp.writeText(o.toString())
+            tmp.writeText(toJson(s).toString())
             tmp.renameTo(file)
         }
     }
 
-    private fun load(): ListsState = runCatching {
-        val o = JSONObject(file.readText())
+    private fun toJson(s: ListsState): JSONObject {
+        val o = JSONObject()
+        o.put("fav", JSONArray(s.favorites))
+        o.put("counts", JSONObject().apply { s.counts.forEach { (k, v) -> put(k, v) } })
+        o.put("lists", JSONArray().apply {
+            s.playlists.forEach { p ->
+                put(JSONObject().put("id", p.id).put("name", p.name).put("paths", JSONArray(p.paths)))
+            }
+        })
+        o.put("resume", JSONObject().apply {
+            s.resume.forEach { (k, r) ->
+                put(k, JSONObject().put("p", r.path).put("t", r.positionMs).put("u", r.updated))
+            }
+        })
+        return o
+    }
+
+    private fun load(): ListsState = runCatching { parse(JSONObject(file.readText())) }.getOrDefault(ListsState())
+
+    private fun parse(o: JSONObject): ListsState {
         fun strings(a: JSONArray?) = if (a == null) emptyList() else List(a.length()) { a.getString(it) }
         val counts = mutableMapOf<String, Int>()
         o.optJSONObject("counts")?.let { c -> c.keys().forEach { counts[it] = c.optInt(it) } }
@@ -171,8 +197,8 @@ class ListsRepository(context: Context) {
                 resume[k] = ResumePoint(x.getString("p"), x.optLong("t"), x.optLong("u"))
             }
         }
-        ListsState(strings(o.optJSONArray("fav")), counts, lists, resume)
-    }.getOrDefault(ListsState())
+        return ListsState(strings(o.optJSONArray("fav")), counts, lists, resume)
+    }
 }
 
 /** Lee listas .m3u / .m3u8 (incluidas las hechas en Windows con rutas tipo D:\Musica\...). */

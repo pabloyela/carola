@@ -73,6 +73,24 @@ fun SettingsScreen(vm: MainViewModel) {
         }
 
         Spacer(Modifier.height(28.dp))
+        Text("Respaldo", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Guarda tus favoritas, listas, conteo, carpetas marcadas y ecualizador en " +
+                "Carola/carola-respaldo.json (memoria interna). Úsalo antes de desinstalar la app.",
+            fontSize = 14.sp, color = Color.White.copy(alpha = 0.55f),
+        )
+        Spacer(Modifier.height(10.dp))
+        Row {
+            FilledTonalButton(onClick = { vm.exportBackup() }, modifier = Modifier.height(54.dp)) {
+                Text("Guardar respaldo", fontSize = 16.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            OutlinedButton(onClick = { vm.importBackup() }, modifier = Modifier.height(54.dp)) {
+                Text("Restaurar respaldo", fontSize = 16.sp)
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
         Text("Almacenamiento detectado", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         if (roots.isEmpty()) {
@@ -84,7 +102,7 @@ fun SettingsScreen(vm: MainViewModel) {
 
         Spacer(Modifier.height(28.dp))
         Text(
-            "Carola 3.1 · Portadas: MusicBrainz y Cover Art Archive",
+            "Carola 3.2 · Portadas: MusicBrainz y Cover Art Archive",
             fontSize = 14.sp, color = Color.White.copy(alpha = 0.4f),
         )
     }

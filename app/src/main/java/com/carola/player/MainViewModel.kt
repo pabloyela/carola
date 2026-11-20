@@ -23,6 +23,7 @@ import com.carola.player.data.Artist
 import com.carola.player.data.AudioFiles
 import com.carola.player.data.CoverRepository
 import com.carola.player.data.CoverRequest
+import com.carola.player.data.Deleter
 import com.carola.player.data.Keys
 import com.carola.player.data.LibraryRepository
 import com.carola.player.data.ListEntry
@@ -50,7 +51,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,6 +68,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONObject
+import android.os.Environment
 import java.io.File
 import kotlin.random.Random
 
@@ -82,6 +87,17 @@ data class PlaybackUi(
     val index: Int = 0,
     val count: Int = 0,
     val queueVersion: Int = 0,
+)
+
+/** Menú al mantener presionado: agregar a lista / eliminar. */
+data class ItemMenu(
+    val title: String,
+    val subtitle: String,
+    val targets: List<File>,
+    val addPaths: List<String>,
+    val isFolder: Boolean = false,
+    /** Álbum: si su carpeta queda sin música, se borra también (portadas sueltas, etc.). */
+    val cleanupFolders: Boolean = false,
 )
 
 data class EqUi(val preset: String, val gains: List<Float>)
@@ -114,6 +130,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _cover = MutableStateFlow<File?>(null)
     val cover: StateFlow<File?> = _cover.asStateFlow()
+
+    private val _coverKey = MutableStateFlow<String?>(null)
+
+    /** Estado de la portada de lo que suena (null = ya tiene portada o no aplica). */
+    val coverStatus: StateFlow<com.carola.player.data.CoverStatus?> by lazy {
+        combine(_coverKey, covers.status) { k, st -> k?.let { st[it] } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    }
 
     private val _accent = MutableStateFlow<Int?>(null)
     val accent: StateFlow<Int?> = _accent.asStateFlow()
@@ -579,6 +603,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (req.key == currentCoverKey) return
         currentCoverKey = req.key
+        _coverKey.value = req.key
         coverJob?.cancel()
         val known = covers.peek(req.key)
         _cover.value = known
@@ -720,6 +745,230 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             currentCoverKey = null
             _cover.value = null
             update()
+        }
+    }
+
+    // ---------- Mensajes cortos (Toast) ----------
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: SharedFlow<String> = _messages
+
+    private fun say(msg: String) {
+        _messages.tryEmit(msg)
+    }
+
+    // ---------- Eliminar ----------
+
+    private val deleter = Deleter(app, prefs)
+
+    private val _menu = MutableStateFlow<ItemMenu?>(null)
+    val menu: StateFlow<ItemMenu?> = _menu.asStateFlow()
+
+    private val _confirmDelete = MutableStateFlow<ItemMenu?>(null)
+    val confirmDelete: StateFlow<ItemMenu?> = _confirmDelete.asStateFlow()
+
+    private val _needAccess = MutableStateFlow<StorageRoot?>(null)
+    /** Memoria USB a la que hay que darle permiso de escritura (muestra el aviso). */
+    val needAccess: StateFlow<StorageRoot?> = _needAccess.asStateFlow()
+
+    private var pendingDelete: ItemMenu? = null
+
+    fun openTrackMenu(path: String) {
+        val f = File(path)
+        val t = library.find(path)
+        _menu.value = ItemMenu(
+            title = t?.title ?: f.nameWithoutExtension,
+            subtitle = listOfNotNull(t?.artist, f.name).joinToString(" · "),
+            targets = listOf(f),
+            addPaths = listOf(path),
+        )
+    }
+
+    fun openFolderMenu(dir: File) {
+        _menu.value = ItemMenu(
+            title = dir.name,
+            subtitle = "Carpeta · ${dir.parent.orEmpty()}",
+            targets = listOf(dir),
+            addPaths = emptyList(),
+            isFolder = true,
+        )
+    }
+
+    fun openAlbumMenu(album: Album) {
+        _menu.value = ItemMenu(
+            title = album.title,
+            subtitle = "${album.artist} · ${album.tracks.size} canciones",
+            targets = album.tracks.map { File(it.path) },
+            addPaths = album.tracks.map { it.path },
+            cleanupFolders = true,
+        )
+    }
+
+    fun closeMenu() {
+        _menu.value = null
+    }
+
+    fun menuAddToList() {
+        val m = _menu.value ?: return
+        _menu.value = null
+        requestAddToList(m.addPaths)
+    }
+
+    fun menuDelete() {
+        _confirmDelete.value = _menu.value
+        _menu.value = null
+    }
+
+    fun cancelDelete() {
+        _confirmDelete.value = null
+    }
+
+    fun performDelete() {
+        val m = _confirmDelete.value ?: return
+        _confirmDelete.value = null
+        runDelete(m)
+    }
+
+    private fun runDelete(m: ItemMenu) {
+        viewModelScope.launch {
+            when (val r = deleter.delete(m.targets, _roots.value)) {
+                is Deleter.Result.Ok -> {
+                    if (m.cleanupFolders) cleanupEmptyFolders(m.targets)
+                    afterDelete(r.deleted.toSet(), m)
+                }
+                is Deleter.Result.NeedsAccess -> {
+                    afterDelete(r.deleted.toSet(), m, quiet = true)
+                    pendingDelete = m
+                    _needAccess.value = r.root
+                }
+                is Deleter.Result.Failed -> {
+                    afterDelete(r.deleted.toSet(), m, quiet = true)
+                    say(r.message)
+                }
+            }
+        }
+    }
+
+    /** Borra las carpetas de un álbum que quedaron sin música (solo con portadas u otros restos). */
+    private suspend fun cleanupEmptyFolders(files: List<File>) {
+        val dirs = files.mapNotNull { it.parentFile }.distinctBy { it.absolutePath }
+        val empty = withContext(Dispatchers.IO) {
+            dirs.filter { d ->
+                val l = AudioFiles.list(d)
+                d.isDirectory && l.files.isEmpty() && l.dirs.isEmpty() &&
+                    _roots.value.none { it.path == d.absolutePath }
+            }
+        }
+        if (empty.isNotEmpty()) deleter.delete(empty, _roots.value)
+    }
+
+    private suspend fun afterDelete(paths: Set<String>, m: ItemMenu, quiet: Boolean = false) {
+        if (paths.isEmpty() && !m.isFolder) return
+        withContext(Dispatchers.IO) { library.remove(paths) }
+        listsRepo.forget(paths)
+        controller?.let { c ->
+            for (i in c.mediaItemCount - 1 downTo 0) {
+                if (c.getMediaItemAt(i).mediaId in paths) c.removeMediaItem(i)
+            }
+        }
+        // Refrescar la carpeta abierta (o subir si la borrada era esa)
+        var cur = _folder.value
+        while (cur != null) {
+            val c = cur
+            if (withContext(Dispatchers.IO) { c.exists() }) break
+            cur = c.parentFile
+        }
+        if (_folder.value != null) openFolder(cur)
+        if (!quiet) {
+            say(
+                when {
+                    m.isFolder -> "Carpeta \"${m.title}\" eliminada"
+                    paths.size == 1 -> "Canción eliminada"
+                    else -> "${paths.size} canciones eliminadas"
+                }
+            )
+        }
+    }
+
+    /** Respuesta del selector de memorias del sistema. */
+    fun onAccessGranted(uri: Uri?) {
+        val root = _needAccess.value
+        _needAccess.value = null
+        val m = pendingDelete
+        pendingDelete = null
+        if (uri == null || root == null || m == null) return
+        viewModelScope.launch {
+            if (deleter.grant(root, uri)) {
+                runDelete(m)
+            } else {
+                say("Elige la memoria completa (${root.name}), no una carpeta dentro de ella.")
+            }
+        }
+    }
+
+    fun dismissAccess() {
+        _needAccess.value = null
+        pendingDelete = null
+    }
+
+    // ---------- Respaldo ----------
+
+    private fun backupFile(): File =
+        File(Environment.getExternalStorageDirectory(), "Carola/carola-respaldo.json")
+
+    fun exportBackup() {
+        viewModelScope.launch {
+            val o = JSONObject()
+                .put("version", 1)
+                .put("lists", listsRepo.toJson())
+                .put("prefs", JSONObject()
+                    .put("music_folders", JSONArray(prefs.musicFolders.toList()))
+                    .put("eq_gains", prefs.eqGains ?: "")
+                    .put("eq_preset", prefs.eqPreset)
+                    .put("normalize", prefs.normalize)
+                    .put("online_covers", prefs.onlineCovers)
+                    .put("scan_whole_usb", prefs.scanWholeUsb)
+                    .put("auto_resume", prefs.autoResume)
+                    .put("big_player", prefs.bigPlayer))
+            val f = backupFile()
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    f.parentFile?.mkdirs()
+                    f.writeText(o.toString(2))
+                    true
+                }.getOrDefault(false)
+            }
+            say(if (ok) "Respaldo guardado en Carola/carola-respaldo.json" else "No se pudo guardar el respaldo (¿permiso de almacenamiento?)")
+        }
+    }
+
+    fun importBackup() {
+        viewModelScope.launch {
+            val f = backupFile()
+            val o = withContext(Dispatchers.IO) { runCatching { JSONObject(f.readText()) }.getOrNull() }
+            if (o == null) {
+                say("No encontré un respaldo en Carola/carola-respaldo.json")
+                return@launch
+            }
+            o.optJSONObject("lists")?.let { listsRepo.restore(it) }
+            o.optJSONObject("prefs")?.let { p ->
+                p.optJSONArray("music_folders")?.let { a ->
+                    val set = List(a.length()) { a.getString(it) }.toSet()
+                    prefs.musicFolders = set
+                    _musicFolders.value = set
+                }
+                prefs.normalize = p.optBoolean("normalize", prefs.normalize)
+                prefs.onlineCovers = p.optBoolean("online_covers", prefs.onlineCovers)
+                prefs.scanWholeUsb = p.optBoolean("scan_whole_usb", prefs.scanWholeUsb)
+                prefs.autoResume = p.optBoolean("auto_resume", prefs.autoResume)
+                setBigPlayer(p.optBoolean("big_player", prefs.bigPlayer))
+                p.optString("eq_gains").takeIf { it.isNotEmpty() }?.let { g ->
+                    saveEq(p.optString("eq_preset", Eq.CUSTOM), Eq.parse(g).toList())
+                }
+                _settings.value = SettingsUi(prefs.onlineCovers, prefs.autoResume, prefs.scanWholeUsb, prefs.normalize)
+            }
+            rescan()
+            say("Respaldo restaurado")
         }
     }
 

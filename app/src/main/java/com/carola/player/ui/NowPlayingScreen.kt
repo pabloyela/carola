@@ -2,6 +2,15 @@ package com.carola.player.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.abs
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -27,7 +36,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.ImageNotSupported
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Fullscreen
@@ -42,6 +53,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +85,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.carola.player.MainViewModel
 import com.carola.player.PlaybackUi
+import com.carola.player.data.CoverStatus
 import com.carola.player.data.formatTime
 import com.carola.player.player.Eq
 import java.io.File
@@ -83,6 +96,7 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
     val cover by vm.cover.collectAsStateWithLifecycle()
     val favorite by vm.isFavorite.collectAsStateWithLifecycle()
     val big by vm.bigPlayer.collectAsStateWithLifecycle()
+    val coverStatus by vm.coverStatus.collectAsStateWithLifecycle()
     var panel by remember { mutableStateOf(Panel.COVER) }
 
     if (!pb.hasMedia) {
@@ -132,13 +146,17 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                     when (p) {
                         Panel.QUEUE -> QueuePanel(vm, pb, Modifier.fillMaxSize())
                         Panel.EQ -> EqPanel(vm, Modifier.fillMaxSize())
-                        Panel.COVER -> FileImage(
-                            cover,
-                            Modifier.fillMaxSize()
-                                .shadow(28.dp, RoundedCornerShape(22.dp))
-                                .clip(RoundedCornerShape(22.dp)),
-                            spinning = pb.isPlaying,
-                        )
+                        Panel.COVER -> Box(Modifier.fillMaxSize()) {
+                            FileImage(
+                                cover,
+                                Modifier.fillMaxSize()
+                                    .then(rememberPlayerGestures(vm) {})
+                                    .shadow(28.dp, RoundedCornerShape(22.dp))
+                                    .clip(RoundedCornerShape(22.dp)),
+                                spinning = pb.isPlaying,
+                            )
+                            if (cover == null) CoverBadge(coverStatus, Modifier.align(Alignment.BottomCenter))
+                        }
                     }
                 }
             }
@@ -230,6 +248,75 @@ fun NowPlayingScreen(vm: MainViewModel, onBrowse: () -> Unit) {
 
 private enum class Panel { COVER, QUEUE, EQ }
 
+/** Etiqueta sobre el tocadiscos: buscando portada, no encontrada, sin internet... */
+@Composable
+private fun CoverBadge(status: CoverStatus?, modifier: Modifier = Modifier) {
+    if (status == null) return
+    val accent = MaterialTheme.colorScheme.primary
+    Row(
+        modifier.padding(bottom = 14.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.72f))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (status == CoverStatus.SEARCHING) {
+            CircularProgressIndicator(Modifier.size(16.dp), color = accent, strokeWidth = 2.dp)
+        } else {
+            Icon(
+                when (status) {
+                    CoverStatus.OFFLINE -> Icons.Rounded.CloudOff
+                    CoverStatus.DISABLED -> Icons.Rounded.CloudOff
+                    else -> Icons.Rounded.ImageNotSupported
+                },
+                null, tint = Color.White.copy(alpha = 0.75f), modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(status.label, fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f), maxLines = 1)
+    }
+}
+
+/**
+ * Gestos sobre la portada:
+ *  - deslizar a la izquierda = siguiente, a la derecha = anterior (la portada acompaña el dedo)
+ *  - doble toque = pausa / reproducir
+ *  - un toque = [onTap]
+ */
+@Composable
+private fun rememberPlayerGestures(vm: MainViewModel, onTap: () -> Unit): Modifier {
+    val tap by rememberUpdatedState(onTap)
+    var drag by remember { mutableFloatStateOf(0f) }
+    val shown by animateFloatAsState(drag, label = "swipe")
+    val threshold = with(LocalDensity.current) { 90.dp.toPx() }
+    return Modifier
+        .graphicsLayer {
+            translationX = shown * 0.6f
+            alpha = 1f - (abs(shown) / (threshold * 4f)).coerceAtMost(0.4f)
+        }
+        .pointerInput(Unit) {
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    when {
+                        drag <= -threshold -> vm.next()
+                        drag >= threshold -> vm.previous()
+                    }
+                    drag = 0f
+                },
+                onDragCancel = { drag = 0f },
+            ) { change, dx ->
+                change.consume()
+                drag += dx
+            }
+        }
+        .pointerInput(Unit) {
+            detectTapGestures(
+                onTap = { tap() },
+                onDoubleTap = { vm.togglePlay() },
+            )
+        }
+}
+
 /** Vista grande: sin menú lateral, portada enorme y botones gigantes. Toca la portada para más opciones. */
 @Composable
 private fun BigPlayer(vm: MainViewModel, pb: PlaybackUi, cover: File?, favorite: Boolean, compact: Boolean) {
@@ -240,14 +327,20 @@ private fun BigPlayer(vm: MainViewModel, pb: PlaybackUi, cover: File?, favorite:
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = if (compact) 12.dp else 24.dp)) {
             Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                FileImage(
-                    cover,
-                    Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true)
-                        .shadow(30.dp, RoundedCornerShape(26.dp))
-                        .clip(RoundedCornerShape(26.dp))
-                        .clickable { extras = !extras },
-                    spinning = pb.isPlaying,
-                )
+                Box(Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true)) {
+                    FileImage(
+                        cover,
+                        Modifier.fillMaxSize()
+                            .then(rememberPlayerGestures(vm) { extras = !extras })
+                            .shadow(30.dp, RoundedCornerShape(26.dp))
+                            .clip(RoundedCornerShape(26.dp)),
+                        spinning = pb.isPlaying,
+                    )
+                    if (cover == null) {
+                        val st by vm.coverStatus.collectAsStateWithLifecycle()
+                        CoverBadge(st, Modifier.align(Alignment.BottomCenter))
+                    }
+                }
                 Spacer(Modifier.width(if (compact) 22.dp else 40.dp))
                 Column(Modifier.weight(1f)) {
                     Text(

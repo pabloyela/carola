@@ -129,6 +129,7 @@ fun CarolaApp(vm: MainViewModel) {
             }
         }
         AddToListDialog(vm)
+        ManageDialogs(vm)
     }
 }
 
