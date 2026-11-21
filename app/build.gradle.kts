@@ -14,8 +14,8 @@ android {
         minSdk = 26
         // targetSdk 28 = Android 9: acceso clásico a las USB por ruta de archivo
         targetSdk = 28
-        versionCode = 5
-        versionName = "3.2"
+        versionCode = 6
+        versionName = "3.2.1"
     }
 
     // Firma fija: todas las versiones salen con la misma llave, así cada APK

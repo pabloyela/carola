@@ -102,7 +102,7 @@ fun SettingsScreen(vm: MainViewModel) {
 
         Spacer(Modifier.height(28.dp))
         Text(
-            "Carola 3.2 · Portadas: MusicBrainz y Cover Art Archive",
+            "Carola 3.2.1 · Portadas: MusicBrainz y Cover Art Archive",
             fontSize = 14.sp, color = Color.White.copy(alpha = 0.4f),
         )
     }

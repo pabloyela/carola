@@ -608,7 +608,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val known = covers.peek(req.key)
         _cover.value = known
         coverJob = viewModelScope.launch {
-            val f = known ?: covers.cover(req)
+            val f = known ?: covers.cover(req, priority = true)
             _cover.value = f
             _accent.value = f?.let { Palettes.accentFrom(it) }
         }

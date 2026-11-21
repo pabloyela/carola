@@ -10,6 +10,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -38,14 +39,18 @@ class MusicBrainzClient {
     private val spaces = Regex("\\s+")
     private val discSuffix = Regex("\\s*[\\(\\[]\\s*(disc|disco|cd)\\s*\\d+\\s*[\\)\\]]", RegexOption.IGNORE_CASE)
 
-    suspend fun findCover(artist: String, album: String?, title: String?): Result =
+    /** Búsquedas prioritarias esperando (la canción que suena): la cuadrícula les cede el turno. */
+    private val priorityWaiting = AtomicInteger(0)
+
+    suspend fun findCover(artist: String, album: String?, title: String?, priority: Boolean = false): Result =
         withContext(Dispatchers.IO) {
+            if (priority) priorityWaiting.incrementAndGet()
             try {
                 val ids = mutableListOf<String>()
 
                 if (album != null) {
                     val q = "releasegroup:\"${clean(album.replace(discSuffix, ""))}\" AND artist:\"${clean(NameCleaner.artist(artist))}\""
-                    val json = getJson("$MB/release-group/?fmt=json&limit=5&query=${enc(q)}")
+                    val json = getJson("$MB/release-group/?fmt=json&limit=5&query=${enc(q)}", priority)
                     val arr = json.optJSONArray("release-groups")
                     if (arr != null) {
                         for (i in 0 until arr.length()) {
@@ -57,11 +62,11 @@ class MusicBrainzClient {
 
                 // Sin álbum (o sin resultados): buscar por canción
                 if (ids.isEmpty() && !title.isNullOrBlank()) {
-                    ids += recordingReleases(title, artist)
+                    ids += recordingReleases(title, artist, priority)
                 }
                 // Por si el nombre era "Artista - Álbum - Canción": probar al revés
                 if (ids.isEmpty() && album != null) {
-                    ids += recordingReleases(album, artist)
+                    ids += recordingReleases(album, artist, priority)
                 }
 
                 if (ids.isEmpty()) return@withContext Result.NotFound
@@ -75,13 +80,15 @@ class MusicBrainzClient {
                 throw e
             } catch (e: Exception) {
                 Result.Error
+            } finally {
+                if (priority) priorityWaiting.decrementAndGet()
             }
         }
 
-    private suspend fun recordingReleases(title: String, artist: String): List<String> {
+    private suspend fun recordingReleases(title: String, artist: String, priority: Boolean): List<String> {
         val ids = mutableListOf<String>()
         val q = "recording:\"${clean(title)}\" AND artist:\"${clean(artist)}\""
-        val json = getJson("$MB/recording/?fmt=json&limit=5&query=${enc(q)}")
+        val json = getJson("$MB/recording/?fmt=json&limit=5&query=${enc(q)}", priority)
         val arr = json.optJSONArray("recordings") ?: return ids
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
@@ -95,7 +102,11 @@ class MusicBrainzClient {
         return ids
     }
 
-    private suspend fun throttle() {
+    private suspend fun throttle(priority: Boolean) {
+        // La cuadrícula espera mientras haya una búsqueda prioritaria pendiente
+        if (!priority) {
+            while (priorityWaiting.get() > 0) delay(150)
+        }
         mutex.withLock {
             val wait = lastCall + 1100 - System.currentTimeMillis()
             if (wait > 0) delay(wait)
@@ -103,17 +114,26 @@ class MusicBrainzClient {
         }
     }
 
-    private suspend fun getJson(url: String): JSONObject {
-        throttle()
-        val c = open(url)
-        c.setRequestProperty("Accept", "application/json")
-        try {
-            val code = c.responseCode
-            if (code != 200) throw IOException("MusicBrainz HTTP $code")
-            val text = c.inputStream.bufferedReader().use { it.readText() }
-            return JSONObject(text)
-        } finally {
-            c.disconnect()
+    private suspend fun getJson(url: String, priority: Boolean): JSONObject {
+        var attempt = 0
+        while (true) {
+            throttle(priority)
+            val c = open(url)
+            c.setRequestProperty("Accept", "application/json")
+            try {
+                val code = c.responseCode
+                // 503 = MusicBrainz ocupado: esperar un poco y repetir (no es falta de internet)
+                if (code == 503 && attempt < 2) {
+                    attempt++
+                    delay(1500L * attempt)
+                    continue
+                }
+                if (code != 200) throw IOException("MusicBrainz HTTP $code")
+                val text = c.inputStream.bufferedReader().use { it.readText() }
+                return JSONObject(text)
+            } finally {
+                c.disconnect()
+            }
         }
     }
 

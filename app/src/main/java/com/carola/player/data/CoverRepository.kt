@@ -6,13 +6,12 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkCapabilities
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap
 enum class CoverStatus(val label: String) {
     SEARCHING("Buscando portada…"),
     NOT_FOUND("Portada no encontrada"),
-    OFFLINE("Sin internet · reintentará sola"),
+    OFFLINE("Sin respuesta · reintentando…"),
     DISABLED("Búsqueda de portadas apagada"),
     NO_INFO("Sin datos para buscar la portada"),
 }
@@ -45,7 +44,8 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
     private val mb = MusicBrainzClient()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val resolved = ConcurrentHashMap<String, File>()
-    private val inflight = ConcurrentHashMap<String, Deferred<File?>>()
+    /** Un candado por álbum: evita buscar dos veces el mismo a la vez. */
+    private val locks = ConcurrentHashMap<String, Mutex>()
     @Volatile private var offlineUntil = 0L
     private val cm = context.getSystemService(ConnectivityManager::class.java)
 
@@ -74,15 +74,28 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
     }
 
     @Volatile private var retryScheduled = false
+    @Volatile private var retryDelay = FIRST_RETRY
 
+    /**
+     * Reintento automático cada vez que algo falla: 15 s, 30 s, 60 s y luego cada 2 min,
+     * hasta que el servidor responda. Así nunca se queda "esperando" para siempre.
+     */
     private fun scheduleRetry() {
         if (retryScheduled) return
         retryScheduled = true
+        val wait = retryDelay
+        retryDelay = (retryDelay * 2).coerceAtMost(MAX_RETRY)
+        offlineUntil = System.currentTimeMillis() + wait
         scope.launch {
-            delay(21_000)
+            delay(wait)
             retryScheduled = false
             refresh()
         }
+    }
+
+    private companion object {
+        const val FIRST_RETRY = 15_000L
+        const val MAX_RETRY = 120_000L
     }
 
     fun refresh() {
@@ -90,16 +103,6 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
         _version.value = _version.value + 1
     }
 
-    private fun hasInternet(): Boolean {
-        val manager = cm ?: return true
-        return try {
-            val n = manager.activeNetwork ?: return false
-            val caps = manager.getNetworkCapabilities(n) ?: return false
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        } catch (e: Exception) {
-            true
-        }
-    }
 
     private val imageExt = setOf("jpg", "jpeg", "png")
     private val preferredNames = listOf(
@@ -118,15 +121,17 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
         return null
     }
 
-    suspend fun cover(req: CoverRequest): File? {
+    /**
+     * Busca la portada. Corre dentro de quien la pide: si una portada de la cuadrícula
+     * sale de la pantalla, su búsqueda se cancela y no estorba a las demás.
+     * [priority] = la canción que está sonando: se atiende antes que la cuadrícula.
+     */
+    suspend fun cover(req: CoverRequest, priority: Boolean = false): File? {
         peek(req.key)?.let { return it }
-        val d = inflight.computeIfAbsent(req.key) {
-            val job = scope.async(start = CoroutineStart.LAZY) { resolve(req) }
-            job.invokeOnCompletion { inflight.remove(req.key, job) }
-            job
+        val lock = locks.getOrPut(req.key) { Mutex() }
+        val r = lock.withLock {
+            peek(req.key) ?: withContext(Dispatchers.IO) { resolve(req, priority) }
         }
-        d.start()
-        val r = d.await()
         if (r != null) resolved[req.key] = r
         return r
     }
@@ -138,13 +143,13 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
         refresh()
     }
 
-    private suspend fun resolve(req: CoverRequest): File? {
-        val r = resolveInner(req)
+    private suspend fun resolve(req: CoverRequest, priority: Boolean): File? {
+        val r = resolveInner(req, priority)
         if (r != null) mark(req.key, null)
         return r
     }
 
-    private suspend fun resolveInner(req: CoverRequest): File? {
+    private suspend fun resolveInner(req: CoverRequest, priority: Boolean): File? {
         val out = cacheFile(req.key)
         if (out.length() > 0) return out
 
@@ -155,9 +160,10 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
             mark(req.key, CoverStatus.DISABLED)
             return null
         }
-        if (System.currentTimeMillis() < offlineUntil || !hasInternet()) {
-            // sin internet: no busca ni marca como "no encontrada"
+        if (System.currentTimeMillis() < offlineUntil) {
+            // Falló hace poco: esperar al reintento automático (ya está programado)
             mark(req.key, CoverStatus.OFFLINE)
+            scheduleRetry()
             return null
         }
 
@@ -183,8 +189,9 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
         }
 
         mark(req.key, CoverStatus.SEARCHING)
-        when (val r = mb.findCover(searchArtist, album, req.title)) {
+        when (val r = mb.findCover(searchArtist, album, req.title, priority)) {
             is MusicBrainzClient.Result.Found -> {
+                retryDelay = FIRST_RETRY // el servidor respondió: hay conexión
                 if (saveScaled(r.bytes, out)) {
                     miss.delete()
                     return out
@@ -192,13 +199,13 @@ class CoverRepository(context: Context, private val prefs: Prefs) {
                 mark(req.key, CoverStatus.NOT_FOUND)
             }
             MusicBrainzClient.Result.NotFound -> {
+                retryDelay = FIRST_RETRY
                 runCatching { miss.writeText("") }
                 mark(req.key, CoverStatus.NOT_FOUND)
             }
             MusicBrainzClient.Result.Error -> {
+                // Internet lento, caído o servidor ocupado: reintentar solo
                 mark(req.key, CoverStatus.OFFLINE)
-                // Internet lento o caído: pausar un momento y reintentar solo
-                offlineUntil = System.currentTimeMillis() + 20_000
                 scheduleRetry()
             }
         }
